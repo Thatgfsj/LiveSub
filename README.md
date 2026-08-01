@@ -16,6 +16,80 @@
 > 说明：Qwen3-ASR 开源权重为 0.6B / 1.7B（"Flash" 是阿里云云端 API 版本，本地用的是开源权重）；
 > 权重归 Qwen 团队所有（Apache-2.0），**模型文件不包含在本仓库**，按下方指引下载。
 
+## 开发提示词（复制给 AI Agent 即可复现本项目）
+
+> 把下面整段复制给任意编程 Agent（Claude 等），即可从零搭建出与 LiveSub 行为一致
+> 的实时直播字幕软件。所有关键决策与坑都已浓缩进提示词；详细踩坑记录见下文
+> 《开发经验与踩坑记录》一节，遇到问题时可对照。
+
+---
+
+**【任务】** 为 Windows 11 开发一个 C++ 直播实时字幕软件：麦克风语音 → 本地 ASR →
+透明置顶字幕窗口（OBS 窗口捕获），端到端延迟 < 2 秒，纯本地运行（无云端 API）。
+
+**【技术栈与依赖】**
+- C++20，CMake + Ninja + MinGW-w64（llvm-mingw，本机唯一可用工具链；无 MSVC）
+- 推理：llama.cpp（pin 到 b10217 或更新，必须含 libmtmd 多模态库与 Qwen3-ASR 支持）
+- 模型：Qwen3-ASR-1.7B GGUF（主模型 Q8_0，音频编码器 mmproj **必须 BF16 全精度**）
+  —— 直接用 llama.cpp 官方组织 `ggml-org/Qwen3-ASR-1.7B-GGUF` 的现成文件
+- 音频采集：WASAPI 共享模式 + 事件驱动（低延迟）；48kHz → 16kHz 重采样
+- 字幕渲染：Direct2D + DirectWrite，**分层透明窗口**（见下方要点）
+
+**【架构】** 采集线程（WASAPI→重采样→VAD）→ 环形缓冲队列 → ASR 线程（分段窗口→
+llama.cpp mtmd 转写→文本合并）→ 主线程（Direct2D 字幕窗 + 托盘 + 设置窗）。
+另需：系统托盘（状态：蓝就绪/绿识别中/红出错；右键菜单：设置/隐藏字幕/记录讲话稿/退出）、
+讲话稿记录（定稿句实时写桌面 `讲话记录_年月日_时分秒.txt`，中文文件名）、
+`livesub.log` 日志文件（每窗口识别内容+耗时）。
+
+**【关键实现要点（务必遵守，均为踩坑结论）】**
+1. **流式识别必须"VAD 分段驱动"**：固定时间滑动窗口必然跨句，识别出"旧句尾+新句头"
+   混合内容，显示层无论如何处理都掩盖不干净。正确做法：VAD 检测到语音段起点时记录
+   累计样本数，识别窗口 = [段起点, 当前]，从句子开头对齐，逐秒增长完善；段结束（静音）
+   时用**固定的段尾样本数**定稿（不要在 ASR 处理时再取"当前"，否则用户停顿后又说新句
+   会导致定稿窗口漂移、新句被提前定稿）。
+2. mtmd 音频流程（已验证路径）：`mtmd_bitmap_init_from_audio` →
+   `mtmd_tokenize`（prompt：`<|im_start|>user\n<__media__>Transcribe the audio.<|im_end|>\n<|im_start|>assistant\n`，
+   marker 自动替换为 `<|audio_start|>`…`<|audio_end|>`）→ 音频 chunk 走
+   `mtmd_batch_init/add_chunk/encode/get_output_embd`（不要用单 chunk 的
+   mtmd_encode_chunk+get_output_embd）→ `mtmd_helper_decode_image_chunk`；
+   文本 chunk 走 `mtmd_helper_eval_chunk_single`；最后自回归采样。
+3. 采样循环手动构建 batch：`llama_batch_init(1,0,1)` 后**必须设 `batch.n_tokens = 1`**
+   （新版 `llama_batch_get_one` 的 pos/logits 是 nullptr）；每次 transcribe 前
+   `llama_memory_clear(llama_get_memory(ctx), true)` 清 KV（M-RoPE 位置检查）。
+4. 环形缓冲：写满后**必须覆盖最旧数据且累计计数器持续增长**（否则 ASR 线程的条件变量
+   永久阻塞，约 12 秒后字幕卡死）；取窗口 = 从缓冲末尾 head_ 往回取最新 N 秒，
+   不是从缓冲起点取。
+5. ASR 线程等待加 200ms 超时（音频停止后段结束的定稿请求才能被处理），
+   数据增量不足一个 hop 时跳过（防重复识别）；**新段首窗等满 1.5s 再识别**
+   （太短窗口识别碎片闪现）；**新段开始时清空历史**（停顿后旧句从字幕消失）。
+6. VAD：帧能量下限 clamp 到 -60dB（数字静音会把底噪估计拉到 -240dB 导致阈值失效）；
+   语音门限用手动值（如 -52dB）或自适应（底噪+余量）；语音持续 min_speech_ms 才确认段开始；
+   窗口级"活跃帧比例"（超阈值 20ms 帧占比 <15% 视为静音）比平均能量鲁棒。
+7. 幻觉过滤："嗯。""啊。"等 ≤2 字语气词不进字幕；与刚定稿句完全相同的结果去重。
+   不要做子串/前缀重叠等更强的显示层过滤——会误杀正常新句（"大家好" vs "大家好，我是主持人"）。
+8. 透明字幕窗：普通窗口 Direct2D 的 alpha 不生效（黑底）。正确做法：
+   `WS_EX_LAYERED` + 内存 DIB（32bpp 预乘 alpha）+ D2D **DCRenderTarget** 画到 DIB +
+   `UpdateLayeredWindow`（SourceConstantAlpha 可做淡入淡出动画）。OBS 用 WGC 捕获可保留透明度。
+9. 字幕最多 2 行；长文本用 `IDWriteTextLayout::SetFontSize` 逐级缩小字号
+   （最多 50%）避免"第二行孤字"；仍超行才滚动保留最后 2 行。
+10. GPU 首次调用要编译 shader（1-3s）→ 启动时用 1 秒静音预热。
+11. MinGW 构建需 `-D_WIN32_WINNT=0x0A00`（cpp-httplib 报错）；中文文件路径一律用
+    `_wfopen`（std::ofstream 按 ANSI 解释 UTF-8 会乱码）；PowerShell 脚本需 UTF-8 BOM。
+12. 设置窗"应用"时重建队列**必须先 join ASR 线程**（悬空条件变量 → 线程挂起）；
+    shutdown 幂等（析构也会调用）。
+13. GPU 加速方案：直接链接 llama.cpp 官方 release 的 win-vulkan 预编译 DLL
+    （llama.dll/mtmd.dll/ggml.dll/ggml-vulkan.dll），免装 Vulkan SDK；
+    运行时复制全部 ggml-cpu-*.dll 变体 + libomp + MinGW 运行时。
+
+**【验收标准】**
+- 中文/英文口播识别正确（自动语言检测），识别结果与语音内容一致
+- 说话 → 约 1.5s 出首版字幕，之后每 0.8s 平滑完善；停顿 0.8s 定稿；停顿后说新句，旧句消失、新句从头渐进
+- 连续说话 60 秒以上不卡死、不重复、不闪回旧内容；纯静音零识别
+- OBS 窗口捕获正常（WGC + 允许透明度）；托盘状态与菜单齐全；讲话稿记录到桌面
+- `livesub.log` 记录每个窗口的识别文本与耗时
+
+---
+
 ## 特性
 
 - 🎙️ **实时流式识别**：VAD 分段驱动，窗口从句子开头对齐，逐秒完善，停顿定稿
