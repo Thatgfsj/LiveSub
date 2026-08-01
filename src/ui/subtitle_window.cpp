@@ -246,7 +246,23 @@ void SubtitleWindow::render() {
         target_->Clear(D2D1::ColorF(0, 0, 0, 0)); // 全透明
 
         if (style_.bg_color >> 24 != 0) {
-            target_->FillRectangle(D2D1::RectF(0, 0, (float)dib_w_, (float)dib_h_), bg_brush_);
+            // 背景只画在文本实际区域（贴合文字，不铺满整个窗口）
+            const float pad = style_.font_size * 0.22f;
+            auto fill_bg = [&](float l, float t, float r, float b) {
+                if (r <= l || b <= t) return;
+                target_->FillRectangle(
+                    D2D1::RectF(std::max(0.0f, l - pad), std::max(0.0f, t - pad),
+                                std::min((float)dib_w_, r + pad),
+                                std::min((float)dib_h_, b + pad)),
+                    bg_brush_);
+            };
+            fill_bg(bg1_left_, bg1_top_, bg1_right_, bg1_bot_);
+            fill_bg(bg2_left_, (float)dib_h_ * 0.5f + bg2_top_,
+                    bg2_right_, (float)dib_h_ * 0.5f + bg2_bot_);
+            // 布局失败兜底：整半区文本（仅非常规路径）
+            if (bg1_bot_ <= bg1_top_ && !full.empty() && text_format_) {
+                fill_bg(0, 0, (float)dib_w_, (float)dib_h_ * 0.5f);
+            }
         }
 
         if (layout_) {
@@ -306,6 +322,7 @@ void SubtitleWindow::set_status(const std::string& status) {
 //   2. 缩到最小仍超行（极端长文本）→ 滚动保留最后 max_lines 行（兜底）
 void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) {
     if (layout_) { layout_->Release(); layout_ = nullptr; }
+    bg1_left_ = bg1_top_ = bg1_right_ = bg1_bot_ = 0; // 无文本 → 无背景
     if (!dwrite_factory_ || !text_format_ || text.empty()) return;
 
     auto make = [&](const std::wstring& t) -> IDWriteTextLayout* {
@@ -315,6 +332,16 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
             return nullptr;
         }
         return l;
+    };
+    // 记录文本实际包围盒（垂直居中后 GetMetrics 已含居中偏移）
+    auto record_bg = [&](IDWriteTextLayout* l) {
+        DWRITE_TEXT_METRICS m;
+        if (l && SUCCEEDED(l->GetMetrics(&m))) {
+            bg1_left_ = m.left;
+            bg1_top_  = m.top;
+            bg1_right_ = m.left + m.width;
+            bg1_bot_  = m.top + m.height;
+        }
     };
 
     const UINT32 max = (UINT32)std::max(1, style_.max_lines);
@@ -336,6 +363,7 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
     }
     if (lines <= max) {
         apply_interim_style(l, text);
+        record_bg(l);
         layout_ = l;
         return;
     }
@@ -358,6 +386,7 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
         l->SetFontSize(size, range);
         apply_interim_style(l, text.substr(skip_chars));
     }
+    record_bg(l);
     layout_ = l;
 }
 
@@ -391,6 +420,7 @@ void SubtitleWindow::apply_interim_style(IDWriteTextLayout* l, const std::wstrin
 // 第二轨布局（与主轨同逻辑：长句缩字号 + interim 样式）
 void SubtitleWindow::rebuild_layout2(const std::wstring& text, float w, float h) {
     if (layout2_) { layout2_->Release(); layout2_ = nullptr; }
+    bg2_left_ = bg2_top_ = bg2_right_ = bg2_bot_ = 0; // 无文本 → 无背景
     if (!dwrite_factory_ || !text_format_ || text.empty()) return;
 
     auto make = [&](const std::wstring& t) -> IDWriteTextLayout* {
@@ -400,6 +430,16 @@ void SubtitleWindow::rebuild_layout2(const std::wstring& text, float w, float h)
             return nullptr;
         }
         return l;
+    };
+    // 记录第二轨文本实际包围盒
+    auto record_bg = [&](IDWriteTextLayout* l) {
+        DWRITE_TEXT_METRICS m;
+        if (l && SUCCEEDED(l->GetMetrics(&m))) {
+            bg2_left_ = m.left;
+            bg2_top_  = m.top;
+            bg2_right_ = m.left + m.width;
+            bg2_bot_  = m.top + m.height;
+        }
     };
 
     const UINT32 max = (UINT32)std::max(1, style_.max_lines);
@@ -423,6 +463,7 @@ void SubtitleWindow::rebuild_layout2(const std::wstring& text, float w, float h)
                                    (UINT32)(text.size() - second_confirmed_)};
         l->SetDrawingEffect(interim_brush_, range);
     }
+    record_bg(l);
     layout2_ = l;
 }
 

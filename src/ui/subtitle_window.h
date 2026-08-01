@@ -81,6 +81,9 @@ private:
     size_t confirmed_offset_ = std::string::npos; // 主轨已确认偏移（interim 样式）
     size_t second_confirmed_ = std::string::npos; // 第二轨已确认偏移
     std::wstring second_text_;                    // 第二轨文本（互斥锁保护）
+    // 文本实际包围区域（布局重建时更新；背景只画这里，不铺满整个窗口）
+    float bg1_left_ = 0, bg1_top_ = 0, bg1_right_ = 0, bg1_bot_ = 0;
+    float bg2_left_ = 0, bg2_top_ = 0, bg2_right_ = 0, bg2_bot_ = 0;
     void rebuild_layout(const std::wstring& text, float w, float h);
     void rebuild_layout2(const std::wstring& text, float w, float h);
     void apply_interim_style(IDWriteTextLayout* l, const std::wstring& t);
