@@ -17,6 +17,16 @@ public:
     //   now_ms 用于记录句子时间（滚动缓冲用），传 0 表示不记录
     std::string update(const std::string& new_text, bool finalize, int64_t now_ms = 0);
 
+    // Local Agreement（whisper_streaming）：当前句已确认部分的字符数
+    size_t confirmed_chars() const { return confirmed_.size(); }
+
+    // confirmed 部分在 current() 输出字符串中的偏移（渲染层用于样式区分）
+    size_t confirmed_offset() const {
+        const std::string cur = current();
+        if (current_.empty()) return cur.size();
+        return cur.size() - current_.size() + confirmed_.size();
+    }
+
     // 滚动缓冲修剪：显示超过 2 行（出现第三行缓冲）时，
     // 最旧句子停留 1 秒后移除（"第三行出现时第一行 1s 后消失"）
     void prune(int64_t now_ms);
@@ -41,7 +51,10 @@ private:
         int64_t ts = 0; // 定稿时间（毫秒，滚动缓冲用）
     };
     std::vector<Sent> sentences_; // 已定稿句子（旧→新）
-    std::string current_;         // 当前句（部分结果）
+    std::string current_;         // 当前句（部分结果：confirmed + interim）
+    std::string confirmed_;       // 当前句已确认部分（Local Agreement，永不回退）
+    std::string prev_result_;     // 上次部分结果（用于公共前缀计算）
+    std::string prev_interim_;    // 上次未确认尾部（interim 只增不减）
     int max_history_ = 8;
     int max_lines_ = 2;           // 固定 2 行：上一句 + 当前句
 

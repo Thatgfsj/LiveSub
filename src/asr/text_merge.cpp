@@ -104,6 +104,9 @@ void TextMerger::prune(int64_t now_ms) {
 std::string TextMerger::update(const std::string& new_text, bool finalize, int64_t now_ms) {
     std::string nt = new_text; // 可变副本（跨句粘连截断会修改）
     if (finalize) {
+        confirmed_.clear();
+        prev_result_.clear();
+        prev_interim_.clear();
         // 定稿：幻觉输出不进入历史；与最后一句历史完全相同 → 不重复记录
         if (!nt.empty() && !is_filler(nt) &&
             (sentences_.empty() || sentences_.back().text != nt)) {
@@ -131,25 +134,38 @@ std::string TextMerger::update(const std::string& new_text, bool finalize, int64
         return current();
     }
 
-    if (current_.empty()) {
-        current_ = nt;
+    // Local Agreement（whisper_streaming 算法）：
+    //   取"上次结果"与"本次结果"的最长公共前缀（去标点比较），
+    //   公共前缀就是两次转写都一致的部分 → 确认为稳定文本（永不回退）；
+    //   尾部（interim）跟随最新结果更新，渲染层用半透明样式区分
+    if (prev_result_.empty()) {
+        confirmed_ = nt;      // 首个结果整体视为已确认
     } else {
-        // 追加式更新（打字机效果：旧字保留、新字追加，不"一点一点消失"）：
-        //   - 新结果以旧内容开头（更完整）→ 增长
-        //   - 识别回退（旧内容更长）→ 保持已显示内容（不缩回）
-        //   - 完全不同（新句开始）→ 替换
-        const std::string cur_p = strip_punct(current_);
-        const std::string nt_p  = strip_punct(nt);
-        if (nt_p.size() > cur_p.size() &&
-            nt_p.compare(0, cur_p.size(), cur_p) == 0) {
-            current_ = nt; // 追加
-        } else if (cur_p.size() > nt_p.size() &&
-                   cur_p.compare(0, nt_p.size(), nt_p) == 0) {
-            // 识别回退 → 保持（不缩回）
-        } else {
-            current_ = nt; // 完全不同 → 新句
+        const size_t cp = common_prefix_len(strip_punct(prev_result_), strip_punct(nt));
+        if (cp == 0) {
+            confirmed_ = nt;  // 完全不同 → 新句开始：确认重置
+            prev_interim_.clear();
+        } else if (cp > strip_punct(confirmed_).size()) {
+            // 公共前缀更长 → 确认部分增长（字节级公共前缀）
+            confirmed_ = nt.substr(0, common_prefix_len(prev_result_, nt));
         }
+        // 公共前缀变短（识别回退）→ confirmed_ 保持（不回退）
     }
+    prev_result_ = nt;
+    // 显示 = confirmed（已确认，稳定不回退）+ interim（未确认尾部）
+    // interim 只增不减：上次尾部与本次尾部取较长者（完整打字机效果）
+    size_t cf = 0;
+    while (cf < confirmed_.size() && cf < nt.size() && confirmed_[cf] == nt[cf]) {
+        cf++;
+    }
+    while (cf > 0 && cf < nt.size() && ((unsigned char)nt[cf] & 0xC0) == 0x80) {
+        cf--; // 回退到 UTF-8 字符边界
+    }
+    const std::string interim_new = nt.substr(cf);
+    const std::string interim = (interim_new.size() >= prev_interim_.size())
+                                    ? interim_new : prev_interim_;
+    current_ = confirmed_ + interim;
+    prev_interim_ = interim;
     return current();
 }
 
@@ -200,4 +216,7 @@ std::vector<std::string> TextMerger::history(int keep) const {
 void TextMerger::clear() {
     sentences_.clear();
     current_.clear();
+    confirmed_.clear();
+    prev_result_.clear();
+    prev_interim_.clear();
 }

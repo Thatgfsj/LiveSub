@@ -390,7 +390,7 @@ void App::asr_loop() {
                         voice_input_.commit_text(r.text + " ");
                     }
                 }
-                window_.set_text(full);
+                window_.set_text(full, merger_.confirmed_offset());
                 if (finalize) window_.set_status("");
                 if (finalize) {
                     // 定稿但无文本（可能只是噪音/气声）

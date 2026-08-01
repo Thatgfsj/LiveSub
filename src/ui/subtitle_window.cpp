@@ -247,11 +247,12 @@ void SubtitleWindow::render() {
     ReleaseDC(nullptr, screen_dc);
 }
 
-void SubtitleWindow::set_text(const std::string& text) {
+void SubtitleWindow::set_text(const std::string& text, size_t confirmed_offset) {
     {
         std::lock_guard<std::mutex> lk(mtx_);
         content_ = to_wide(text);
     }
+    confirmed_offset_ = confirmed_offset;
     layout_dirty_ = true;
 }
 
@@ -298,6 +299,7 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
         size *= 0.92f;
     }
     if (lines <= max) {
+        apply_interim_style(l, text);
         layout_ = l;
         return;
     }
@@ -318,8 +320,19 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
     if (l) {
         DWRITE_TEXT_RANGE range = {0, (UINT32)text.size() - skip_chars};
         l->SetFontSize(size, range);
+        apply_interim_style(l, text.substr(skip_chars));
     }
     layout_ = l;
+}
+
+// interim（未确认尾部）半透明样式：confirmed 偏移之后的部分
+void SubtitleWindow::apply_interim_style(IDWriteTextLayout* l, const std::wstring& t) {
+    if (!l || !interim_brush_ || confirmed_offset_ == std::string::npos) return;
+    if (confirmed_offset_ < t.size()) {
+        DWRITE_TEXT_RANGE range = {(UINT32)confirmed_offset_,
+                                   (UINT32)(t.size() - confirmed_offset_)};
+        l->SetDrawingEffect(interim_brush_, range);
+    }
 }
 
 std::wstring SubtitleWindow::to_wide(const std::string& s) const {
