@@ -1,6 +1,7 @@
 ﻿; LiveSub 安装脚本（NSIS 3.x，Unicode + 简体中文界面）
 ; 生成 LiveSub-Setup.exe：安装程序 + 完成页自动下载模型
 Unicode true
+Icon "..\icons\livesub.ico"
 Name "LiveSub 直播实时字幕"
 OutFile "LiveSub-Setup.exe"
 InstallDir "$LOCALAPPDATA\LiveSub"

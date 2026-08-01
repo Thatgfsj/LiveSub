@@ -57,6 +57,7 @@ endif()
 # LiveSub（GUI 子系统：双击运行无控制台窗口，日志走 livesub.log + 托盘）
 # ---------------------------------------------------------------------------
 add_executable(livesub WIN32
+    src/livesub.rc
     src/main.cpp
     src/app.cpp
     src/config.cpp
