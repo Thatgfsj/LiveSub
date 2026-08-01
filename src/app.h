@@ -1,6 +1,7 @@
 #pragma once
 // 应用主类：双字幕管线（麦克风 / 电脑声音）共享单个 ASR 引擎（显存一份）
-// 采集线程×2 → VAD×2 → 分窗队列×2 → 单 ASR 线程串行识别 → 字幕窗口×2
+// 采集线程×2 → VAD×2 → 分窗队列×2 → 单 ASR 线程串行识别 → 单个共享字幕窗口
+// （同一展示框整窗显示，两条字幕一般不同时开启，不做上下分割）
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -46,7 +47,7 @@ struct AsrPipeline {
 
     // 识别与显示
     TextMerger merger;
-    SubtitleWindow window;
+    SubtitleWindow* window = nullptr;  // 指向 App 的唯一共享字幕窗口
     std::vector<float> win_buf;
     TextOutput output;
 };
@@ -88,12 +89,17 @@ private:
     // 管线启停（start_capture=false 时只建识别链不采集，供 wav 测试）
     bool start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture = true);
     void stop_pipeline(AsrPipeline& p);
+    // 唯一共享字幕窗口（麦克风主轨上半区 / 电脑声音第二轨下半区），惰性创建
+    bool ensure_window();
 
     Config cfg_;
 
     // 两条字幕管线
     AsrPipeline mic_;   // 麦克风字幕（默认开）
     AsrPipeline pc_;    // 电脑字幕（默认关）
+
+    // 唯一共享字幕窗口（两条管线共用同一展示框，整窗显示当前识别的字幕）
+    SubtitleWindow window_;
 
     // 共享单引擎（显存一份），ASR 线程串行使用
     AsrEngine asr_;

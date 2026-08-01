@@ -148,8 +148,8 @@ void SettingsWindow::read_fields() {
     cfg_.font_size         = (float)std::max(12, edit_int(IDC_FONT_SIZE, (int)cfg_.font_size));
     cfg_.font_color        = edit_str(IDC_FONT_COLOR);
     cfg_.bg_color          = edit_str(IDC_BG_COLOR);
-    cfg_.pos_x             = std::max(0, std::min(100, edit_int(IDC_WIN_X, cfg_.pos_x)));
-    cfg_.pos_y             = std::max(0, std::min(100, edit_int(IDC_WIN_Y, cfg_.pos_y)));
+    cfg_.pos_x             = std::max(0, std::min(GetSystemMetrics(SM_CXSCREEN), edit_int(IDC_WIN_X, cfg_.pos_x)));
+    cfg_.pos_y             = std::max(0, std::min(GetSystemMetrics(SM_CYSCREEN), edit_int(IDC_WIN_Y, cfg_.pos_y)));
     {
         // 背景透明度：0-100% 写回 bg_color 的 alpha（保留原 RGB）
         int pct = edit_int(IDC_BG_ALPHA, 75);
@@ -314,11 +314,11 @@ void SettingsWindow::run() {
     CreateWindowW(L"STATIC", L"（也可在托盘右键快速切换）", WS_CHILD | WS_VISIBLE | SS_LEFT,
                   PAD + 260, y - ROW_H + 4, 220, 18, h,
                   nullptr, GetModuleHandleW(nullptr), nullptr);
-    add_label(h, 0, L"位置 %", PAD, next());
+    add_label(h, 0, L"位置X", PAD, next());
     add_edit(h, IDC_WIN_X, L"", LABEL_W + PAD, y - ROW_H + 1);
-    CreateWindowW(L"STATIC", L"屏幕百分比 0-100；50=居中（默认 50, 85 居中偏下）",
+    CreateWindowW(L"STATIC", L"字幕中心点像素坐标；X=960 居中，Y=900 贴近底部（默认 960, 900）",
                   WS_CHILD | WS_VISIBLE | SS_LEFT,
-                  LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 320, 18, h,
+                  LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 340, 18, h,
                   nullptr, GetModuleHandleW(nullptr), nullptr);
     add_edit(h, IDC_WIN_Y, L"", LABEL_W + EDIT_W + PAD + 130, y - ROW_H + 1);
 

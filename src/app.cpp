@@ -32,11 +32,11 @@ void App::update_tray(TrayIcon::State s, const std::string& tip) {
 // ---------------------------------------------------------------------------
 // 管线启停
 // ---------------------------------------------------------------------------
-bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
-    if (p.enabled.load()) return true;
+// 唯一共享字幕窗口（两条管线共用一个展示框：mic 主轨上半区 / pc 第二轨下半区）。
+// 位置按 ui.pos_x/pos_y 百分比，并 clamp 到屏幕内（保证第二轨字幕完整可见）。
+bool App::ensure_window() {
+    if (window_.ok()) return true;
 
-    // 窗口（两个轨道共用主窗口：主轨上半区 / 第二轨下半区；
-    //        pc 轨启动时若主窗口未创建则创建）
     SubtitleWindow::Style st;
     st.font_family   = utf8_to_wide(cfg_.font_family);
     st.font_size     = cfg_.font_size;
@@ -51,14 +51,29 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
     st.fade_in_ms    = cfg_.fade_in_ms;
     st.fade_out_ms   = cfg_.fade_out_ms;
     st.fps           = cfg_.fps;
-    // 位置：统一使用 ui.pos_x/pos_y（默认 50/85 靠下，不在屏幕中间）
-    st.window_x = GetSystemMetrics(SM_CXSCREEN) * cfg_.pos_x / 100 - cfg_.window_w / 2;
-    st.window_y = GetSystemMetrics(SM_CYSCREEN) * cfg_.pos_y / 100 - cfg_.window_h / 2;
+    st.stroke_enabled = cfg_.stroke_enabled;
+    st.stroke_color  = parse_color(cfg_.stroke_color).value_or(0xFF000000);
+    st.stroke_width  = cfg_.stroke_width;
+    // 位置：像素中心坐标（pos_x/pos_y 为窗口中心点）。
+    // 水平 clamp 到屏幕内（字幕横向完整可见）；垂直只保底 >=0，
+    // 允许窗口底部略超出屏幕——字幕内容居中显示仍完整可见（默认中心 900 贴近底部）
+    const int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
+    st.window_x = std::max(0, std::min(cfg_.pos_x - st.window_w / 2, sw - st.window_w));
+    st.window_y = std::max(0, cfg_.pos_y - st.window_h / 2);
     std::wstring err;
-    if (!p.window.create(st, &err)) {
-        logf("[%s] 字幕窗口创建失败: %ls\n", p.name.c_str(), err.c_str());
+    if (!window_.create(st, &err)) {
+        logf("[app] 字幕窗口创建失败: %ls\n", err.c_str());
         return false;
     }
+    return true;
+}
+
+bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
+    if (p.enabled.load()) return true;
+
+    // 共享窗口：只创建一次，两条管线共用
+    if (!ensure_window()) return false;
+    p.window = &window_;
 
     // 队列 / VAD / 重采样
     p.resampler = new Resampler(cfg_.sample_rate, asr_.sample_rate());
@@ -73,13 +88,14 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
     p.vad->on_speech_start = [this, &p](int64_t) {
         p.speaking = true;
         if (p.queue) p.seg_start = p.queue->total_samples();
-        p.window.set_status("识别中…");
+        // "识别中…"只归麦克风轨（PC 轨字幕直接上屏，不占用主轨状态位）
+        if (&p == &mic_) p.window->set_status("识别中…");
     };
     p.vad->on_speech_end = [this, &p](int64_t) {
         p.speaking = false;
         if (p.queue) p.seg_end = p.queue->total_samples();
         p.finalize_pending = true;
-        p.window.set_status("");
+        if (&p == &mic_) p.window->set_status("");
     };
     p.resample_buf.resize((size_t)asr_.sample_rate() * 2);
     p.win_buf.reserve((size_t)asr_.sample_rate() * 32);
@@ -117,16 +133,22 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
 
 void App::stop_pipeline(AsrPipeline& p) {
     p.enabled = false;
+    p.window = nullptr;
     if (p.queue) p.queue->stop();
     p.capture.stop();
     if (p.vad) { delete p.vad; p.vad = nullptr; }
     if (p.queue) { delete p.queue; p.queue = nullptr; }
     if (p.resampler) { delete p.resampler; p.resampler = nullptr; }
     p.merger.clear();
-    p.window.destroy();
     p.output.clear();
     p.speaking = false;
     p.finalize_pending = false;
+    // 两条管线都停 → 清空共享窗口内容（窗口保留，内容空了会淡出）
+    if (!mic_.enabled.load() && !pc_.enabled.load()) {
+        window_.set_text("");
+        window_.set_second_text("");
+        window_.set_status("");
+    }
     logf("[%s] 字幕已关闭\n", p.name.c_str());
 }
 
@@ -153,9 +175,9 @@ bool App::init(const std::string& config_path, bool enable_capture) {
     // 托盘
     tray_.on_open_settings = [this]() { open_settings(); };
     tray_.on_toggle_window = [this]() {
-        if (mic_.window.hwnd()) {
-            const bool vis = IsWindowVisible(mic_.window.hwnd());
-            ShowWindow(mic_.window.hwnd(), vis ? SW_HIDE : SW_SHOWNOACTIVATE);
+        if (window_.hwnd()) {
+            const bool vis = IsWindowVisible(window_.hwnd());
+            ShowWindow(window_.hwnd(), vis ? SW_HIDE : SW_SHOWNOACTIVATE);
         }
     };
     tray_.on_quit = [this]() { PostQuitMessage(0); };
@@ -165,12 +187,12 @@ bool App::init(const std::string& config_path, bool enable_capture) {
         if (voice_input_.enabled()) {
             voice_input_.set_enabled(false);
             tray_.set_voice_input(false);
-            mic_.window.set_status("语音输入已关闭");
+            if (window_.ok()) window_.set_status("语音输入已关闭");
             logf("[app] 语音输入已关闭\n");
         } else {
             voice_input_.set_enabled(true);
             tray_.set_voice_input(true);
-            mic_.window.set_status("语音输入已开启：说话将输入到当前窗口");
+            if (window_.ok()) window_.set_status("语音输入已开启：说话将输入到当前窗口");
             logf("[app] 语音输入已开启\n");
         }
     };
@@ -179,16 +201,16 @@ bool App::init(const std::string& config_path, bool enable_capture) {
             mic_.output.stop_recording();
             tray_.set_recording(false);
             update_tray(TrayIcon::State::Ready, "LiveSub 记录已结束，文件在桌面");
-            mic_.window.set_status("记录已结束，文件在桌面");
+            if (window_.ok()) window_.set_status("记录已结束，文件在桌面");
         } else {
             std::string path;
             if (mic_.output.start_recording(&path)) {
                 tray_.set_recording(true);
                 update_tray(TrayIcon::State::Ready, "LiveSub 正在记录讲话稿…");
-                mic_.window.set_status("正在记录讲话稿…");
+                if (window_.ok()) window_.set_status("正在记录讲话稿…");
                 logf("[app] 开始记录讲话稿: %s\n", path.c_str());
             } else {
-                mic_.window.set_status("记录启动失败（无法创建桌面文件）");
+                if (window_.ok()) window_.set_status("记录启动失败（无法创建桌面文件）");
             }
         }
     };
@@ -337,7 +359,7 @@ bool App::process_pipeline(AsrPipeline& p) {
             r = asr_.transcribe(p.win_buf.data(), n);
         } catch (const std::exception& e) {
             logf("[%s] 引擎异常: %s\n", p.name.c_str(), e.what());
-            p.window.set_status("识别引擎异常: " + std::string(e.what()));
+            if (&p == &mic_) p.window->set_status("识别引擎异常: " + std::string(e.what()));
             last_asr_heartbeat_ms_ = now_ms();
             return false;
         }
@@ -348,20 +370,18 @@ bool App::process_pipeline(AsrPipeline& p) {
     if (r.ok) {
         const std::string full = p.merger.update(r.text, finalize, now_ms());
         if (!r.text.empty()) {
-            if (&p == &mic_) {
-                p.window.set_text(full, p.merger.confirmed_offset());
-            } else {
-                p.window.set_second_text(full, p.merger.confirmed_offset());
-            }
+            // 单一展示框整窗显示：哪条管线在识别就显示谁的字幕
+            // （不分割上下半区——两条字幕一般不会同时开）
+            p.window->set_text(full, p.merger.confirmed_offset());
             if (finalize) {
-                p.window.set_status("");
+                p.window->set_status("");
                 // 语音输入：只对麦克风轨定稿句输入
                 if (&p == &mic_ && voice_input_.enabled()) {
                     voice_input_.commit_text(r.text + " ");
                 }
             }
         } else if (finalize) {
-            p.window.set_status("未识别到语音");
+            if (&p == &mic_) p.window->set_status("未识别到语音");
         }
         if (cfg_.log_level >= 1) {
             logf("[%s] %s | total=%lldms%s\n", p.name.c_str(),
@@ -369,7 +389,7 @@ bool App::process_pipeline(AsrPipeline& p) {
                  (long long)cost, finalize ? " [FINAL]" : "");
         }
     } else {
-        p.window.set_status("识别错误: " + asr_.last_error());
+        if (&p == &mic_) p.window->set_status("识别错误: " + asr_.last_error());
         if (cfg_.log_level >= 1) {
             logf("[%s] 识别失败: %s\n", p.name.c_str(), asr_.last_error().c_str());
         }

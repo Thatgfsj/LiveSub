@@ -37,9 +37,9 @@ struct Config {
     std::string stroke_color = "#000000"; // 描边颜色（默认黑色）
     int   stroke_width     = 2;        // 描边粗细（像素）
     int   window_w          = 1280;
-    int   window_h          = 480;   // 双轨字幕窗口高度（上下分区）
-    int   pos_x             = 50;      // 水平位置（屏幕宽百分比 0-100，50=居中，越大越靠右）
-    int   pos_y             = 85;      // 垂直位置（屏幕高百分比 0-100，50=居中，越大越靠下）
+    int   window_h          = 480;
+    int   pos_x             = 960;     // 字幕窗口中心点 X（像素，默认 960 居中）
+    int   pos_y             = 900;     // 字幕窗口中心点 Y（像素，默认 900 贴近屏幕底部）
     int   max_lines         = 2;       // 固定 2 行：上一句 + 当前句
     bool  always_on_top     = true;
     bool  click_through     = true;    // 鼠标穿透（默认开启，不挡直播操作）

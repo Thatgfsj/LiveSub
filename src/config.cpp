@@ -181,6 +181,9 @@ Config Config::load(const std::string& path) {
     c.window_h           = get_int(kv, "ui.window_h", c.window_h);
     c.pos_x              = get_int(kv, "ui.pos_x", c.pos_x);
     c.pos_y              = get_int(kv, "ui.pos_y", c.pos_y);
+    // 旧版兼容：<=200 视为屏幕百分比（旧默认 50/85），迁移为像素中心坐标
+    if (c.pos_x <= 200) c.pos_x = GetSystemMetrics(SM_CXSCREEN) * c.pos_x / 100;
+    if (c.pos_y <= 200) c.pos_y = GetSystemMetrics(SM_CYSCREEN) * c.pos_y / 100;
     c.max_lines          = get_int(kv, "ui.max_lines", c.max_lines);
     c.always_on_top      = get_bool(kv, "ui.always_on_top", c.always_on_top);
     c.click_through      = get_bool(kv, "ui.click_through", c.click_through);
