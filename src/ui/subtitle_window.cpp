@@ -182,9 +182,8 @@ void SubtitleWindow::render() {
 
     // 1. 淡入淡出动画：内容从无到有 → 渐入；从有到无 → 渐出
     {
-        std::wstring* content = content_.load();
-        std::wstring* status = status_.load();
-        const bool has_content = (content && !content->empty()) || (status && !status->empty());
+        std::lock_guard<std::mutex> lk(mtx_);
+        const bool has_content = !content_.empty() || !status_.empty();
         if (has_content != anim_has_content_) {
             anim_has_content_ = has_content;
             last_anim_ms_ = (int64_t)GetTickCount64();
@@ -216,13 +215,14 @@ void SubtitleWindow::render() {
             target_->FillRectangle(D2D1::RectF(0, 0, (float)dib_w_, (float)dib_h_), bg_brush_);
         }
 
-        std::wstring* content = content_.load();
-        std::wstring* status = status_.load();
         std::wstring full;
-        if (content && !content->empty()) {
-            full = *content;
-        } else if (status && !status->empty() && style_.show_status) {
-            full = *status;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            if (!content_.empty()) {
+                full = content_;
+            } else if (!status_.empty() && style_.show_status) {
+                full = status_;
+            }
         }
         if (!full.empty()) {
             const float pad = style_.font_size * 0.4f;
@@ -257,14 +257,18 @@ void SubtitleWindow::render() {
 }
 
 void SubtitleWindow::set_text(const std::string& text) {
-    std::wstring* old = content_.exchange(new std::wstring(to_wide(text)));
-    delete old;
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        content_ = to_wide(text);
+    }
     layout_dirty_ = true;
 }
 
 void SubtitleWindow::set_status(const std::string& status) {
-    std::wstring* old = status_.exchange(new std::wstring(to_wide(status)));
-    delete old;
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        status_ = to_wide(status);
+    }
     layout_dirty_ = true;
 }
 
@@ -289,16 +293,19 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
     IDWriteTextLayout* l = make(text);
     if (!l) return;
 
-    // 1. 字号自适应：超行时逐级缩小（每次 8%），让内容尽量两行饱满
-    //    （避免"第二行只有一个字"的孤字现象）
+    // 1. 字号自适应：仅对【超长的单句】（不含显式换行）逐级缩小字号，
+    //    避免"第二行孤字"；多句短文本不缩字号（每行几个字保持原字号）
+    const bool multi_line_text = text.find(L'\n') != std::wstring::npos;
     float size = style_.font_size;
-    for (int attempt = 0; attempt < 14; attempt++) {
-        DWRITE_TEXT_RANGE range = {0, (UINT32)text.size()};
-        l->SetFontSize(size, range);
-        UINT32 lines = 0;
-        l->GetLineMetrics(nullptr, 0, &lines);
-        if (lines <= max || size <= min_size) break;
-        size *= 0.92f;
+    if (!multi_line_text) {
+        for (int attempt = 0; attempt < 14; attempt++) {
+            DWRITE_TEXT_RANGE range = {0, (UINT32)text.size()};
+            l->SetFontSize(size, range);
+            UINT32 lines = 0;
+            l->GetLineMetrics(nullptr, 0, &lines);
+            if (lines <= max || size <= min_size) break;
+            size *= 0.92f;
+        }
     }
 
     // 2. 仍超行 → 滚动保留最后 max 行
@@ -339,8 +346,11 @@ void SubtitleWindow::destroy() {
         DestroyWindow(hwnd_);
         hwnd_ = nullptr;
     }
-    delete content_.exchange(nullptr);
-    delete status_.exchange(nullptr);
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        content_.clear();
+        status_.clear();
+    }
     release_d2d();
     if (dib_) { DeleteObject(dib_); dib_ = nullptr; }
     if (mem_dc_) { DeleteDC(mem_dc_); mem_dc_ = nullptr; }

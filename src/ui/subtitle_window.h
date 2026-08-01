@@ -4,6 +4,7 @@
 // 这是 OBS "窗口捕获" 的目标窗口
 #include <string>
 #include <atomic>
+#include <mutex>
 
 #include <windows.h>
 
@@ -75,9 +76,10 @@ private:
     void* dib_bits_ = nullptr;
     int dib_w_ = 0, dib_h_ = 0;
 
-    // 内容（跨线程，用原子指针换新）
-    std::atomic<std::wstring*> content_{nullptr};
-    std::atomic<std::wstring*> status_{nullptr};
+    // 内容（跨线程：互斥锁保护，避免 set/渲染并发 use-after-free）
+    mutable std::mutex mtx_;
+    std::wstring content_;
+    std::wstring status_;
 
     // 淡入淡出动画（主线程 render 推进）
     float alpha_ = 0.0f;          // 当前窗口 alpha 0-1
