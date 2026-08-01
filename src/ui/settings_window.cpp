@@ -35,9 +35,13 @@ enum {
 // DPI 缩放：进程已声明 DPI 感知（见 livesub.manifest），
 // 所有界面尺寸按屏幕 DPI 换算（96 基准），避免在 125%/150% 缩放下文字模糊/控件错位
 static int S(int v) { return MulDiv(v, GetDpiForSystem(), 96); }
-static const int LABEL_W = S(150), EDIT_W = S(80), PAD = S(12);
-static int PAGE_TOP = S(40);  // 内容区起点 Y（Tab 下方，run() 中用 TCM_ADJUSTRECT 精确计算）
-static const int BTN_Y = S(412); // 底部按钮 Y（on_size 时贴底）
+// 布局常量：运行时求值（静态初始化期调用 Win32 API 不可靠，
+// GetDpiForSystem 若返回 0 会导致所有尺寸归零、控件挤没）
+static int LABEL_W() { return S(150); }
+static int EDIT_W()  { return S(80); }
+static int PAD()     { return S(12); }
+static int PAGE_TOP = 0;      // 内容区起点 Y（run() 中 TCM_ADJUSTRECT 计算）
+// BTN_Y 改为 run() 局部变量
 
 SettingsWindow::SettingsWindow(Config& cfg,
                                std::function<void()> on_apply,
@@ -52,12 +56,12 @@ SettingsWindow::~SettingsWindow() {
 // label（右对齐，宽度足够容纳中文长标签，避免文字被裁）
 static void add_label(HWND parent, const wchar_t* text, int x, int y) {
     CreateWindowW(L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_RIGHT,
-                  x, y + S(4), LABEL_W, S(20), parent, nullptr, GetModuleHandleW(nullptr), nullptr);
+                  x, y + S(4), LABEL_W(), S(20), parent, nullptr, GetModuleHandleW(nullptr), nullptr);
 }
 
 static HWND add_edit(HWND parent, int id, int x, int y) {
     return CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-                         x, y, EDIT_W, S(22), parent, (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
+                         x, y, EDIT_W(), S(22), parent, (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
 }
 
 // 说明文字（灰色小字）：宽度按文本实际测量自适应（不截断、不超窗）
@@ -236,11 +240,11 @@ void SettingsWindow::show_page(int page) {
 // （等比缩放控件会导致间距错乱，因此不做）
 void SettingsWindow::on_size(int w, int h) {
     HWND tab = GetDlgItem(hwnd_, IDC_TAB);
-    if (tab) SetWindowPos(tab, nullptr, 0, 0, w - PAD * 2, S(26), SWP_NOMOVE | SWP_NOZORDER);
+    if (tab) SetWindowPos(tab, nullptr, 0, 0, w - PAD() * 2, S(26), SWP_NOMOVE | SWP_NOZORDER);
     HWND a = GetDlgItem(hwnd_, IDC_APPLY);
     HWND c = GetDlgItem(hwnd_, IDC_CLOSE);
-    if (a) SetWindowPos(a, nullptr, PAD, h - S(34), S(120), S(26), SWP_NOZORDER);
-    if (c) SetWindowPos(c, nullptr, PAD + S(130), h - S(34), S(80), S(26), SWP_NOZORDER);
+    if (a) SetWindowPos(a, nullptr, PAD(), h - S(34), S(120), S(26), SWP_NOZORDER);
+    if (c) SetWindowPos(c, nullptr, PAD() + S(130), h - S(34), S(80), S(26), SWP_NOZORDER);
 }
 
 LRESULT CALLBACK SettingsWindow::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -322,7 +326,8 @@ void SettingsWindow::run() {
     RegisterClassExW(&wc);
 
     const int W = S(640);
-    const int H = BTN_Y + S(40); // 内容 + 底部按钮 + 边距
+    const int btn_y = S(412);
+    const int H = btn_y + S(40); // 内容 + 底部按钮 + 边距
     const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU |
                         WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX;
     RECT wrc = {0, 0, W, H};
@@ -345,7 +350,7 @@ void SettingsWindow::run() {
 
     // ---- Tab 控件（4 页） ----
     HWND tab = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                             PAD, S(8), W - PAD * 2, S(26), h, (HMENU)(INT_PTR)IDC_TAB, hinst, nullptr);
+                             PAD(), S(8), W - PAD() * 2, S(26), h, (HMENU)(INT_PTR)IDC_TAB, hinst, nullptr);
     {
         TCITEMW ti = {};
         ti.mask = TCIF_TEXT;
@@ -363,39 +368,36 @@ void SettingsWindow::run() {
         PAGE_TOP = tr.top + S(2);
     }
 
-    const int c1 = PAD + S(8);                    // 列1 label X
-    const int c1e = c1 + LABEL_W + S(6);          // 列1 edit X
+    const int c1 = PAD() + S(8);                    // 列1 label X
+    const int c1e = c1 + LABEL_W() + S(6);          // 列1 edit X
     const int c2 = S(340);                        // 列2 label X
-    const int c2e = c2 + LABEL_W + S(6);          // 列2 edit X
+    const int c2e = c2 + LABEL_W() + S(6);          // 列2 edit X
     auto row1 = [&](int i) { return PAGE_TOP + i * S(34); };
 
     // ================= 页1 字幕显示（两列） =================
+    // 列1 行尾不放说明文字：列1 hint 起点(≈264)会侵入列2 区域(≥340)造成重叠，
+    // 关键范围说明已并入 label（如"透明度%(0-100)"）
     add_label(h, L"字号", c1, row1(0));
     add_edit(h, IDC_FONT_SIZE, c1e, row1(0));
     add_label(h, L"文字颜色", c1, row1(1));
     add_edit(h, IDC_FONT_COLOR, c1e, row1(1));
-    add_hint(h, L"#RRGGBB（默认白）", c1e + EDIT_W + S(8), row1(1));
     add_label(h, L"背景颜色", c1, row1(2));
     add_edit(h, IDC_BG_COLOR, c1e, row1(2));
-    add_label(h, L"背景透明度%", c1, row1(3));
+    add_label(h, L"透明度%(0-100)", c1, row1(3));
     add_edit(h, IDC_BG_ALPHA, c1e, row1(3));
-    add_hint(h, L"0=全透明 100=不透明（默认20）", c1e + EDIT_W + S(8), row1(3));
-    add_label(h, L"字幕行数", c1, row1(4));
+    add_label(h, L"行数(1-6)", c1, row1(4));
     add_edit(h, IDC_MAX_LINES, c1e, row1(4));
-    add_hint(h, L"1-6（默认2：上一句+当前句）", c1e + EDIT_W + S(8), row1(4));
     CreateWindowW(L"BUTTON", L"文字描边", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                   c1, row1(5), S(96), S(22), h, (HMENU)(INT_PTR)IDC_STROKE, hinst, nullptr);
     add_edit(h, IDC_STROKE_COLOR, c1e, row1(5));
-    add_hint(h, L"描边色 #RRGGBB", c1e + EDIT_W + S(8), row1(5));
-    add_label(h, L"描边粗", c1, row1(6));
+    add_label(h, L"描边粗(1-8)", c1, row1(6));
     add_edit(h, IDC_STROKE_W, c1e, row1(6));
-    add_hint(h, L"1-8 像素", c1e + EDIT_W + S(8), row1(6));
 
     add_label(h, L"位置X(中心)", c2, row1(0));
     add_edit(h, IDC_WIN_X, c2e, row1(0));
     add_label(h, L"位置Y(中心)", c2, row1(1));
     add_edit(h, IDC_WIN_Y, c2e, row1(1));
-    add_hint(h, L"像素坐标；X=960 居中，Y=900 贴近底部", c2 + S(8), row1(3));
+    add_hint(h, L"X=960 居中，Y=900 靠底", c2 + S(8), row1(3));
     CreateWindowW(L"BUTTON", L"置顶", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                   c2, row1(2), S(100), S(22), h, (HMENU)(INT_PTR)IDC_TOP, hinst, nullptr);
     CreateWindowW(L"BUTTON", L"点击穿透", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
@@ -405,7 +407,7 @@ void SettingsWindow::run() {
     // ================= 页2 识别（单列） =================
     add_label(h, L"VAD 阈值(dB)", c1, row1(0));
     add_edit(h, IDC_VAD_THRESH, c1e, row1(0));
-    add_hint(h, L"说话触发门限（默认-52），越接近0越难触发", c1e + EDIT_W + S(8), row1(0));
+    add_hint(h, L"说话触发门限（默认-52），越接近0越难触发", c1e + EDIT_W() + S(8), row1(0));
     add_label(h, L"句末静音(ms)", c1, row1(1));
     add_edit(h, IDC_SILENCE, c1e, row1(1));
     add_label(h, L"识别窗口(ms)", c1, row1(2));
@@ -417,17 +419,17 @@ void SettingsWindow::run() {
                   c1e, row1(4), S(150), S(22), h, (HMENU)(INT_PTR)IDC_MODEL_BIG, hinst, nullptr);
     CreateWindowW(L"BUTTON", L"小模型 0.6B（更快）", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
                   c1e + S(160), row1(4), S(150), S(22), h, (HMENU)(INT_PTR)IDC_MODEL_SMALL, hinst, nullptr);
-    add_hint(h, L"大≈2.8GB / 小≈1.1GB，保存后重启生效", c1e + EDIT_W + S(8), row1(5));
+    add_hint(h, L"大≈2.8GB / 小≈1.1GB，保存后重启生效", c1e + EDIT_W() + S(8), row1(5));
     CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
-                  c1, row1(6), W - PAD * 2 - c1, S(44), h, (HMENU)(INT_PTR)IDC_MODEL_INFO, hinst, nullptr);
+                  c1, row1(6), W - PAD() * 2 - c1, S(44), h, (HMENU)(INT_PTR)IDC_MODEL_INFO, hinst, nullptr);
 
     // ================= 页3 音频（单列） =================
     add_label(h, L"麦克风", c1, row1(0));
     CreateWindowW(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
-                  c1e, row1(0), EDIT_W + S(200), S(200), h,
+                  c1e, row1(0), EDIT_W() + S(200), S(200), h,
                   (HMENU)(INT_PTR)IDC_DEVICE, hinst, nullptr);
     CreateWindowW(L"BUTTON", L"刷新", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                  c1e + EDIT_W + S(210), row1(0), S(56), S(22), h,
+                  c1e + EDIT_W() + S(210), row1(0), S(56), S(22), h,
                   (HMENU)(INT_PTR)IDC_REFRESH, hinst, nullptr);
     CreateWindowW(L"BUTTON", L"麦克风字幕", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                   c1, row1(2), S(120), S(22), h, (HMENU)(INT_PTR)IDC_MIC_TRACK, hinst, nullptr);
@@ -448,9 +450,9 @@ void SettingsWindow::run() {
 
     // ---- 底部按钮 ----
     CreateWindowW(L"BUTTON", L"应用并保存", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                  PAD, BTN_Y, S(120), S(26), h, (HMENU)(INT_PTR)IDC_APPLY, hinst, nullptr);
+                  PAD(), btn_y, S(120), S(26), h, (HMENU)(INT_PTR)IDC_APPLY, hinst, nullptr);
     CreateWindowW(L"BUTTON", L"关闭", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                  PAD + S(130), BTN_Y, S(80), S(26), h, (HMENU)(INT_PTR)IDC_CLOSE, hinst, nullptr);
+                  PAD() + S(130), btn_y, S(80), S(26), h, (HMENU)(INT_PTR)IDC_CLOSE, hinst, nullptr);
 
     fill_fields();
 
