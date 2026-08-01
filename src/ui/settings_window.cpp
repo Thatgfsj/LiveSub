@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <utility>
+#include <vector>
 
 #include "config.h"
 #include "audio/wasapi_capture.h"
@@ -53,10 +54,22 @@ SettingsWindow::~SettingsWindow() {
     if (hfont_) { DeleteObject(hfont_); hfont_ = nullptr; }
 }
 
+// ---- 页控件注册表 ----
+// 问题：label/hint 创建时无 ID（HMENU=nullptr），show_page 按 ID 区间遍历永远找不到它们，
+// 导致所有页的标签/说明文字同时可见、互相重叠。改为创建时按"当前页"登记句柄。
+static std::vector<std::pair<HWND, int>> g_page_ctls; // (控件, 所属页)
+static int g_cur_page = 0;                            // 当前创建控件所属页（run() 布局段设置）
+
+static void register_ctl(HWND c) {
+    if (c) g_page_ctls.emplace_back(c, g_cur_page);
+}
+
 // label（右对齐，宽度足够容纳中文长标签，避免文字被裁）
 static void add_label(HWND parent, const wchar_t* text, int x, int y) {
-    CreateWindowW(L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_RIGHT,
-                  x, y + S(4), LABEL_W(), S(20), parent, nullptr, GetModuleHandleW(nullptr), nullptr);
+    HWND c = CreateWindowW(L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_RIGHT,
+                           x, y + S(4), LABEL_W(), S(20), parent, nullptr,
+                           GetModuleHandleW(nullptr), nullptr);
+    register_ctl(c);
 }
 
 static HWND add_edit(HWND parent, int id, int x, int y) {
@@ -82,8 +95,10 @@ static HWND add_hint(HWND parent, const wchar_t* text, int x, int y) {
     int w = (rc.right - rc.left) + S(4);
     const int maxw = cr.right - S(8) - x;
     if (w > maxw) w = maxw; // 超窗时截断到窗口内
-    return CreateWindowW(L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT,
+    HWND c = CreateWindowW(L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT,
                          x, y + S(4), w, S(18), parent, nullptr, GetModuleHandleW(nullptr), nullptr);
+    register_ctl(c);
+    return c;
 }
 
 static std::wstring get_edit_text(HWND hwnd) {
@@ -234,6 +249,10 @@ void SettingsWindow::show_page(int page) {
             if (c) ShowWindow(c, vis ? SW_SHOW : SW_HIDE);
         }
     }
+    // label/hint（无 ID）：按句柄容器同步显隐
+    for (auto& [c, pg] : g_page_ctls) {
+        ShowWindow(c, pg == page ? SW_SHOW : SW_HIDE);
+    }
 }
 
 // 窗口尺寸变化：内容布局保持不变，只拉宽 Tab、把底部按钮贴到窗口底部
@@ -348,6 +367,10 @@ void SettingsWindow::run() {
 
     HWND h = hwnd_;
 
+    // 每次打开清空页控件注册表（句柄会随窗口销毁失效）
+    g_page_ctls.clear();
+    g_cur_page = 0;
+
     // ---- Tab 控件（4 页） ----
     HWND tab = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
                              PAD(), S(8), W - PAD() * 2, S(26), h, (HMENU)(INT_PTR)IDC_TAB, hinst, nullptr);
@@ -375,6 +398,7 @@ void SettingsWindow::run() {
     auto row1 = [&](int i) { return PAGE_TOP + i * S(34); };
 
     // ================= 页1 字幕显示（两列） =================
+    g_cur_page = 0;
     // 列1 行尾不放说明文字：列1 hint 起点(≈264)会侵入列2 区域(≥340)造成重叠，
     // 关键范围说明已并入 label（如"透明度%(0-100)"）
     add_label(h, L"字号", c1, row1(0));
@@ -405,6 +429,7 @@ void SettingsWindow::run() {
     add_hint(h, L"穿透后鼠标可正常操作直播软件", c2 + S(8), row1(4));
 
     // ================= 页2 识别（单列） =================
+    g_cur_page = 1;
     add_label(h, L"VAD 阈值(dB)", c1, row1(0));
     add_edit(h, IDC_VAD_THRESH, c1e, row1(0));
     add_hint(h, L"说话触发门限（默认-52），越接近0越难触发", c1e + EDIT_W() + S(8), row1(0));
@@ -424,6 +449,7 @@ void SettingsWindow::run() {
                   c1, row1(6), W - PAD() * 2 - c1, S(44), h, (HMENU)(INT_PTR)IDC_MODEL_INFO, hinst, nullptr);
 
     // ================= 页3 音频（单列） =================
+    g_cur_page = 2;
     add_label(h, L"麦克风", c1, row1(0));
     CreateWindowW(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
                   c1e, row1(0), EDIT_W() + S(200), S(200), h,
@@ -440,6 +466,7 @@ void SettingsWindow::run() {
              c1, row1(3));
 
     // ================= 页4 输出（单列） =================
+    g_cur_page = 3;
     CreateWindowW(L"BUTTON", L"写文本文件", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                   c1, row1(0), S(120), S(22), h, (HMENU)(INT_PTR)IDC_WRITE_TEXT, hinst, nullptr);
     add_hint(h, L"每次定稿句追加到 subtitles.txt", c1 + S(130), row1(0));
