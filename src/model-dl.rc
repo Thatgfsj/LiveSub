@@ -1,2 +1,3 @@
-// LiveSub 图标资源
+// model-dl 图标资源 + DPI 感知 manifest
 IDI_ICON1 ICON "../icons/livesub.ico"
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "livesub.manifest"
