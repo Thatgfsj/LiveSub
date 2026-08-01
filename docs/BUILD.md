@@ -4,12 +4,12 @@
 
 | 组件 | 要求 | 说明 |
 |---|---|---|
-| 工具链 | llvm-mingw 或 MinGW-w64（gcc ≥ 12） | 本机已装：`O:\llvm-mingw\mingw64`（GCC 14.2） |
-| CMake | ≥ 3.24 | 本机已装 3.30.4 |
-| Ninja | 推荐 | 本机已装 |
-| Git | 任意 | 本机已装 2.55 |
+| 工具链 | MinGW-w64（gcc ≥ 12，llvm-mingw 亦可）或 MSVC | 任一可用即可 |
+| CMake | ≥ 3.24 | — |
+| Ninja | 推荐 | — |
+| Git | 任意 | — |
 | Vulkan SDK | 可选（GPU 加速必需） | 见下文 |
-| Python 3.10+ | 仅模型转换备选路径需要 | 本机已装 3.11 |
+| Python 3.10+ | 仅模型转换备选路径需要 | — |
 
 ## 构建步骤
 
@@ -41,7 +41,7 @@ git clone --depth 1 --branch b10217 https://github.com/ggml-org/llama.cpp.git
 .\scripts\build.ps1
 ```
 
-**Vulkan GPU 版（推荐，RX 7800 XT）** —— 两种方式任选：
+**Vulkan GPU 版（推荐，AMD/NVIDIA 独显）** —— 两种方式任选：
 
 **方式 A：链接官方预编译 DLL（免装 SDK，推荐）**
 
@@ -66,7 +66,7 @@ git clone --depth 1 --branch b10217 https://github.com/ggml-org/llama.cpp.git
 ## 手动构建（命令行）
 
 ```bash
-export PATH="/o/llvm-mingw/mingw64/bin:$PATH"   # 本机 MinGW
+export PATH="/path/to/mingw64/bin:$PATH"        # MinGW 根目录
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release [-DGGML_VULKAN=ON]
 cmake --build build -j 20
 ```
@@ -77,5 +77,5 @@ cmake --build build -j 20
 |---|---|
 | `_WIN32_WINNT` / `CreateFile2` 未定义 | CMake 已自动加 `-D_WIN32_WINNT=0x0A00`（MinGW） |
 | Vulkan 报 `find_package(Vulkan ... glslc)` 失败 | 未安装 Vulkan SDK，或装完未重开终端 |
-| 运行报缺 DLL（libstdc++-6.dll 等） | 把 `O:\llvm-mingw\mingw64\bin` 加入 PATH（run.ps1 已处理） |
+| 运行报缺 DLL（libstdc++-6.dll 等） | 把 MinGW 的 `bin` 目录加入 PATH（run.ps1 已处理） |
 | 模型加载 OOM | `gpu_layers` 调小（如 20），或换 CPU |

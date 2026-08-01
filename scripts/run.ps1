@@ -15,7 +15,7 @@ $Root = Split-Path -Parent $PSScriptRoot
 # 运行时 DLL：build 目录（预编译模式已复制 DLL）+ MinGW 运行时
 foreach ($c in @("$Root\build", "$Root\tools\sdk\vulkan",
                  "$env:ProgramFiles\llvm-mingw\bin", "C:\llvm-mingw\bin",
-                 "O:\llvm-mingw\mingw64\bin", "C:\mingw64\bin")) {
+                 "C:\mingw64\bin")) {
     if (Test-Path $c) { $env:PATH = "$c;$env:PATH" }
 }
 

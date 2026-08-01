@@ -19,7 +19,6 @@ if ($MingwPath -eq "") {
     $candidates = @(
         "$env:ProgramFiles\llvm-mingw",
         "C:\llvm-mingw",
-        "O:\llvm-mingw\mingw64",
         "C:\mingw64"
     )
     foreach ($c in $candidates) {

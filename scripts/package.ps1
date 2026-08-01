@@ -40,7 +40,7 @@ Write-Host "主程序: livesub.exe" -ForegroundColor Green
 # ---- 3. 复制运行时 DLL ----
 # MinGW 运行时（libstdc++ 等，任何模式都需要）
 if ($MingwPath -eq "") {
-    foreach ($c in @("$env:ProgramFiles\llvm-mingw", "C:\llvm-mingw", "O:\llvm-mingw\mingw64", "C:\mingw64")) {
+    foreach ($c in @("$env:ProgramFiles\llvm-mingw", "C:\llvm-mingw", "C:\mingw64")) {
         if (Test-Path "$c\bin\gcc.exe") { $MingwPath = $c; break }
     }
 }
