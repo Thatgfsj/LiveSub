@@ -125,8 +125,12 @@ std::string TextMerger::update(const std::string& new_text, bool finalize, int64
     if (!sentences_.empty() && nt == sentences_.back().text) {
         return current();
     }
-    // 分段驱动下窗口从句子开头对齐，不再需要子串/跨句/重叠等启发式补丁
-    // （那些补丁会误杀正常新句，如"大家好"后说"大家好，我是主持人"）
+    // 旧句尾巴兜底：新结果包含在最后定稿句中（子串）→ 丢弃
+    // （长语音段窗口滑动时可能识别出上一句尾部；子串检测不会误杀正常新句）
+    if (!nt.empty() && !sentences_.empty() &&
+        sentences_.back().text.find(nt) != std::string::npos) {
+        return current();
+    }
 
     if (current_.empty()) {
         current_ = nt;
@@ -139,17 +143,16 @@ std::string TextMerger::update(const std::string& new_text, bool finalize, int64
 }
 
 std::string TextMerger::current() const {
-    // 文本流式输出：已定稿句子与当前句连续拼接（空格分隔），
-    // 不按"一句一行"分行——由渲染层负责软换行与"保留最后 N 行"滚动。
-    // 这样字幕像聊天记录一样满一行自然换行，不会出现"第二行带第一行句末"。
+    // 每句一行：已定稿句子（上一句）与当前句分行显示——
+    // "上一句固定在第一行，当前句在第二行实时更新"
     std::string s;
     const size_t keep = std::min(sentences_.size(), (size_t)max_history_);
     for (size_t i = sentences_.size() - keep; i < sentences_.size(); i++) {
-        if (!s.empty()) s += " ";
+        if (!s.empty()) s += "\n";
         s += sentences_[i].text;
     }
     if (!current_.empty()) {
-        if (!s.empty()) s += " ";
+        if (!s.empty()) s += "\n";
         s += current_;
     }
     return s;

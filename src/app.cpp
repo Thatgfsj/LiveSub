@@ -296,14 +296,9 @@ void App::asr_loop() {
         }
         last_processed_total_ = total_now;
 
-        // 新语音段开始：清空历史（旧句子滚出，字幕只显示当前段内容）
-        const size_t seg_now = seg_start_total_.load();
-        if (!finalize && seg_now != last_seg_start_) {
-            last_seg_start_ = seg_now;
-            merger_.clear();
-            window_.set_text("");
-        }
         // 新段首窗最短 1.5s：太短的窗口识别质量差（碎片闪现），等积累够再识别
+        // （不清理历史：上一句保留在第一行，新句在第二行实时更新）
+        const size_t seg_now = seg_start_total_.load();
         if (!finalize &&
             total_now - seg_now < (size_t)asr_.sample_rate() * 3 / 2) {
             last_asr_heartbeat_ms_ = t_now;
