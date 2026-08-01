@@ -7,7 +7,7 @@
 #include <vector>
 
 // 分层窗口 + UpdateLayeredWindow：
-//   D2D 渲染到内存 DIB（32bpp premultiplied alpha）→ 上传为窗口内容。
+//   D2D 渲染到内存 DIB（32bpp 预乘 alpha）→ 上传为窗口内容。
 //   每像素 alpha 完全生效，背景可半透明/全透明，OBS WGC 捕获可保留透明度。
 
 LRESULT CALLBACK SubtitleWindow::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -57,7 +57,6 @@ bool SubtitleWindow::create(const Style& s, std::wstring* err) {
     wc.lpszClassName = cls;
     RegisterClassExW(&wc);
 
-    // 初始化 D2D/DWrite
     if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &d2d_factory_))) {
         if (err) *err = L"Direct2D 初始化失败";
         return false;
@@ -68,7 +67,6 @@ bool SubtitleWindow::create(const Style& s, std::wstring* err) {
         return false;
     }
 
-    // 分层窗口样式
     DWORD ex_style = WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     if (style_.always_on_top) ex_style |= WS_EX_TOPMOST;
     if (style_.click_through) ex_style |= WS_EX_TRANSPARENT;
@@ -76,23 +74,16 @@ bool SubtitleWindow::create(const Style& s, std::wstring* err) {
     RECT rc = {0, 0, style_.window_w, style_.window_h};
     AdjustWindowRectEx(&rc, WS_POPUP, FALSE, ex_style);
 
-    int x = style_.window_x, y = style_.window_y;
-    if (x < 0 || y < 0) {
-        const int sw = GetSystemMetrics(SM_CXSCREEN);
-        const int sh = GetSystemMetrics(SM_CYSCREEN);
-        if (x < 0) x = (sw - style_.window_w) / 2;
-        if (y < 0) y = sh - style_.window_h - 60;
-    }
-
     hwnd_ = CreateWindowExW(ex_style, cls, L"LiveSub 字幕", WS_POPUP,
-                            x, y, rc.right - rc.left, rc.bottom - rc.top,
+                            style_.window_x, style_.window_y,
+                            rc.right - rc.left, rc.bottom - rc.top,
                             nullptr, nullptr, hinst, this);
     if (!hwnd_) {
         if (err) *err = L"创建字幕窗口失败";
         return false;
     }
 
-    // 内存 DIB（32bpp top-down premultiplied）
+    // 内存 DIB（32bpp top-down 预乘 alpha）
     const int w = style_.window_w, h = style_.window_h;
     HDC screen_dc = GetDC(nullptr);
     mem_dc_ = CreateCompatibleDC(screen_dc);
@@ -122,7 +113,7 @@ bool SubtitleWindow::create(const Style& s, std::wstring* err) {
 }
 
 void SubtitleWindow::release_d2d() {
-    if (layout_)     { layout_->Release();     layout_     = nullptr; }
+    if (layout_)      { layout_->Release();      layout_      = nullptr; }
     if (text_format_) { text_format_->Release(); text_format_ = nullptr; }
     if (text_brush_)  { text_brush_->Release();  text_brush_  = nullptr; }
     if (bg_brush_)    { bg_brush_->Release();    bg_brush_    = nullptr; }
@@ -132,7 +123,6 @@ void SubtitleWindow::release_d2d() {
 void SubtitleWindow::apply_style() {
     if (!hwnd_) return;
 
-    // 置顶/点击穿透
     if (style_.always_on_top) {
         SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
@@ -171,9 +161,11 @@ void SubtitleWindow::apply_style() {
             style_.font_size, L"zh-CN", &text_format_);
         if (text_format_) {
             text_format_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-            text_format_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            // 底部对齐：行数超出时被裁的是顶部旧内容，最新字幕始终可见
+            text_format_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_FAR);
         }
     }
+    layout_dirty_ = true;
 }
 
 void SubtitleWindow::render() {
@@ -188,10 +180,12 @@ void SubtitleWindow::render() {
             anim_has_content_ = has_content;
             last_anim_ms_ = (int64_t)GetTickCount64();
         }
+    }
+    {
         const int64_t now = (int64_t)GetTickCount64();
         const float dt = (float)(now - last_anim_ms_) / 1000.0f;
         last_anim_ms_ = now;
-        const float target = has_content ? 1.0f : 0.0f;
+        const float target = anim_has_content_ ? 1.0f : 0.0f;
         const float duration = (target > alpha_) ? (float)style_.fade_in_ms / 1000.0f
                                                  : (float)style_.fade_out_ms / 1000.0f;
         if (duration > 0.0f && alpha_ != target) {
@@ -204,8 +198,24 @@ void SubtitleWindow::render() {
         }
     }
 
-    // 2. D2D 画到内存 DIB
-    if (target_ && bg_brush_ && text_brush_ && text_format_) {
+    // 2. 取当前文本（锁内拷贝）
+    std::wstring full;
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        if (!content_.empty()) {
+            full = content_;
+        } else if (!status_.empty() && style_.show_status) {
+            full = status_;
+        }
+    }
+
+    // 3. 布局（文本变化时重建）
+    if (layout_dirty_.exchange(false)) {
+        rebuild_layout(full, (float)dib_w_, (float)dib_h_);
+    }
+
+    // 4. D2D 画到内存 DIB
+    if (target_ && bg_brush_ && text_brush_ && (text_format_ || layout_)) {
         RECT rc = {0, 0, dib_w_, dib_h_};
         if (FAILED(target_->BindDC(mem_dc_, &rc))) return;
         target_->BeginDraw();
@@ -215,39 +225,20 @@ void SubtitleWindow::render() {
             target_->FillRectangle(D2D1::RectF(0, 0, (float)dib_w_, (float)dib_h_), bg_brush_);
         }
 
-        std::wstring full;
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            if (!content_.empty()) {
-                full = content_;
-            } else if (!status_.empty() && style_.show_status) {
-                full = status_;
-            }
-        }
-        if (!full.empty()) {
+        if (layout_) {
+            target_->DrawTextLayout(D2D1::Point2F(0, 0), layout_, text_brush_,
+                                    D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        } else if (!full.empty() && text_format_) {
             const float pad = style_.font_size * 0.4f;
-            const float w = (float)dib_w_ - pad * 2.0f;
-            const float h = (float)dib_h_ - pad * 2.0f;
-            if (layout_dirty_.exchange(false)) {
-                rebuild_layout(full, w, h);
-            }
-            if (layout_) {
-                target_->DrawTextLayout(D2D1::Point2F(pad, pad), layout_, text_brush_,
-                                        D2D1_DRAW_TEXT_OPTIONS_CLIP);
-            } else {
-                // 布局失败时退化为直接绘制
-                D2D1_RECT_F trc = D2D1::RectF(pad, pad, pad + w, pad + h);
-                target_->DrawTextW(full.c_str(), (UINT32)full.size(), text_format_, trc,
-                                   text_brush_, D2D1_DRAW_TEXT_OPTIONS_CLIP);
-            }
-        } else if (layout_dirty_.exchange(false)) {
-            rebuild_layout(L"", 0, 0);
+            D2D1_RECT_F trc = D2D1::RectF(pad, pad, (float)dib_w_ - pad, (float)dib_h_ - pad);
+            target_->DrawTextW(full.c_str(), (UINT32)full.size(), text_format_, trc,
+                               text_brush_, D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
         if (FAILED(target_->EndDraw())) return;
     }
 
-    // 3. 上传分层窗口（SourceConstantAlpha = 动画 alpha）
-    if (alpha_ <= 0.001f) return; // 全透明无需上传
+    // 5. 上传分层窗口（SourceConstantAlpha = 动画 alpha）
+    if (alpha_ <= 0.001f) return;
     HDC screen_dc = GetDC(nullptr);
     POINT pt = {0, 0};
     SIZE sz = {dib_w_, dib_h_};
@@ -272,8 +263,9 @@ void SubtitleWindow::set_status(const std::string& status) {
     layout_dirty_ = true;
 }
 
-// 构建文本布局：行数超过 max_lines 时，只保留【最后 max_lines 行】
-// （滚动字幕：最新内容在底部，旧内容向上滚出）
+// 构建文本布局：仅对【超长的单句】（不含显式换行）逐级缩小字号
+// （避免"第二行孤字"）；多句文本不缩字号，不砍句——句子完整性由
+// TextMerger 保证（只输出最近 N 句），超行时靠底部对齐保留最新内容
 void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) {
     if (layout_) { layout_->Release(); layout_ = nullptr; }
     if (!dwrite_factory_ || !text_format_ || text.empty()) return;
@@ -293,24 +285,9 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
     IDWriteTextLayout* l = make(text);
     if (!l) return;
 
-    // 1. 字号自适应：仅对【超长的单句】（不含显式换行）逐级缩小字号，
-    //    避免"第二行孤字"；多句短文本不缩字号（每行几个字保持原字号）
-    //    从上次字号开始尝试（平滑过渡，避免内容长短变化时字号跳变）
     const bool multi_line_text = text.find(L'\n') != std::wstring::npos;
     float size = style_.font_size;
     if (!multi_line_text) {
-        // 上次缩过字号且文本没变长太多 → 沿用上次字号
-        if (last_layout_size_ > 0.0f && last_layout_size_ < style_.font_size) {
-            DWRITE_TEXT_RANGE range = {0, (UINT32)text.size()};
-            l->SetFontSize(last_layout_size_, range);
-            UINT32 lines = 0;
-            l->GetLineMetrics(nullptr, 0, &lines);
-            if (lines <= max) {
-                size = last_layout_size_;
-            } else {
-                size = last_layout_size_; // 继续从上次字号往下缩
-            }
-        }
         for (int attempt = 0; attempt < 14; attempt++) {
             DWRITE_TEXT_RANGE range = {0, (UINT32)text.size()};
             l->SetFontSize(size, range);
@@ -318,40 +295,6 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
             l->GetLineMetrics(nullptr, 0, &lines);
             if (lines <= max || size <= min_size) break;
             size *= 0.92f;
-        }
-        // 文本明显变短（恢复原字号能放下）→ 回到原字号
-        if (last_layout_size_ > 0.0f && size == last_layout_size_) {
-            DWRITE_TEXT_RANGE range = {0, (UINT32)text.size()};
-            l->SetFontSize(style_.font_size, range);
-            UINT32 lines = 0;
-            l->GetLineMetrics(nullptr, 0, &lines);
-            if (lines <= max) {
-                size = style_.font_size;
-            }
-        }
-        last_layout_size_ = size;
-    }
-
-    // 2. 仍超行 → 滚动保留最后 max 行
-    UINT32 line_count = 0;
-    l->GetLineMetrics(nullptr, 0, &line_count);
-    if (line_count > max) {
-        std::vector<DWRITE_LINE_METRICS> metrics(line_count);
-        l->GetLineMetrics(metrics.data(), line_count, &line_count);
-        UINT32 skip_chars = 0;
-        for (UINT32 i = 0; i < line_count - max; i++) {
-            skip_chars += metrics[i].length;
-        }
-        // 裁剪时若起点落在代理对中间则回退一字符（保险）
-        while (skip_chars > 0 && skip_chars < text.size() &&
-               (text[skip_chars] & 0xFC00) == 0xDC00) {
-            skip_chars--;
-        }
-        l->Release();
-        l = make(text.substr(skip_chars));
-        if (l) {
-            DWRITE_TEXT_RANGE range = {0, (UINT32)text.size() - skip_chars};
-            l->SetFontSize(size, range); // 保持缩放后的字号
         }
     }
     layout_ = l;

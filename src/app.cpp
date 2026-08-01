@@ -373,13 +373,13 @@ void App::asr_loop() {
         const int64_t cost = now_ms() - t0;
         last_asr_heartbeat_ms_ = now_ms();
 
-        // 定稿判定：VAD 静音到达（语音段结束）
-        const std::string full = merger_.update(r.text, finalize, now_ms());
-        if (finalize) {
-            last_finalize_ms_ = now_ms();
-        }
-
         if (r.ok) {
+            // 定稿判定：VAD 静音到达（语音段结束）；识别失败不更新合并器
+            // （避免失败时清空当前句导致显示丢失）
+            const std::string full = merger_.update(r.text, finalize, now_ms());
+            if (finalize) {
+                last_finalize_ms_ = now_ms();
+            }
             if (!r.text.empty()) {
                 output_.update(full, finalize ? r.text : std::string());
                 // 讲话稿记录：定稿句实时写入桌面文件
@@ -392,9 +392,10 @@ void App::asr_loop() {
                 }
                 window_.set_text(full);
                 if (finalize) window_.set_status("");
-            } else if (finalize) {
-                // 定稿但无文本（可能只是噪音/气声）
-                window_.set_status("未识别到语音（可调低 VAD 门限或靠近麦克风）");
+                if (finalize) {
+                    // 定稿但无文本（可能只是噪音/气声）
+                    window_.set_status("未识别到语音（可调低 VAD 门限或靠近麦克风）");
+                }
             }
             if (cfg_.log_level >= 1) {
                 logf("[asr] %s | enc=%lldms dec=%lldms total=%lldms%s\n",

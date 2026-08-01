@@ -89,10 +89,9 @@ size_t TextMerger::common_prefix_len(const std::string& a, const std::string& b)
 }
 
 void TextMerger::prune(int64_t now_ms) {
-    // 常态 2 行；超过 2 行（第 3 行缓冲出现）时，最旧句停留 1 秒后移除
-    while (!sentences_.empty()) {
-        const int total = (int)sentences_.size() + (current_.empty() ? 0 : 1);
-        if (total <= 2) break;                       // 未超 2 行 → 保留
+    // 历史句保留数 = max_lines_ - 当前句占位；超出时最旧句停留 1 秒后移除
+    const int keep = std::max(1, max_lines_ - (current_.empty() ? 0 : 1));
+    while ((int)sentences_.size() > keep) {
         if (now_ms - sentences_.front().ts < 1000) break; // 最旧句未满 1 秒
         sentences_.erase(sentences_.begin());
     }
@@ -160,11 +159,15 @@ std::string TextMerger::current() const {
         }
     }
 
+    // 只输出最近 max_lines_ 句（句子级滚动，完整句子不砍断）
     std::string s;
-    const size_t keep = std::min(sentences_.size(), (size_t)max_history_);
-    for (size_t i = sentences_.size() - keep; i < sentences_.size(); i++) {
-        if (!s.empty()) s += "\n";
-        s += sentences_[i].text;
+    const size_t keep_sent = std::max(0, max_lines_ - (current_.empty() ? 0 : 1));
+    if (keep_sent > 0 && !sentences_.empty()) {
+        const size_t from = (sentences_.size() > (size_t)keep_sent) ? sentences_.size() - keep_sent : 0;
+        for (size_t i = from; i < sentences_.size(); i++) {
+            if (!s.empty()) s += "\n";
+            s += sentences_[i].text;
+        }
     }
     if (!current_.empty()) {
         if (!s.empty()) s += "\n";
