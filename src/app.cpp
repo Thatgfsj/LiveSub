@@ -80,8 +80,20 @@ bool App::init(const std::string& config_path, bool enable_capture) {
     tray_ready_ = tray_.create(L"LiveSub 字幕");
     update_tray(TrayIcon::State::Loading, "LiveSub 加载中…");
 
-    // 日志文件（追加，便于排查）
-    log_file_ = fopen((resolve_path("livesub.log")).c_str(), "ab");
+    // 日志文件（追加；超过 2MB 时截断重写，防止无限增长）
+    {
+        const std::string log_path = resolve_path("livesub.log");
+        FILE* f = fopen(log_path.c_str(), "rb");
+        if (f) {
+            fseek(f, 0, SEEK_END);
+            const long sz = ftell(f);
+            fclose(f);
+            if (sz > 2 * 1024 * 1024) {
+                remove(log_path.c_str());
+            }
+        }
+        log_file_ = fopen(log_path.c_str(), "ab");
+    }
     if (log_file_) {
         logf("\n===== LiveSub 启动 %s =====\n", "=====");
     }

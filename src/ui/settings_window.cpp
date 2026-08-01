@@ -29,6 +29,7 @@ enum {
     IDC_WIN_X       = 1017,
     IDC_WIN_Y       = 1018,
     IDC_BG_ALPHA    = 1019,
+    IDC_MAX_LINES   = 1020,
 };
 
 static const int LABEL_W = 120, EDIT_W = 90, ROW_H = 30, PAD = 12;
@@ -91,6 +92,7 @@ void SettingsWindow::fill_fields() {
         const int pct = (int)(((c >> 24) & 0xFF) * 100 / 255);
         set_edit(IDC_BG_ALPHA, std::to_wstring(pct));
     }
+    set_edit(IDC_MAX_LINES, std::to_wstring(cfg_.max_lines));
     CheckDlgButton(hwnd_, IDC_TOP,        cfg_.always_on_top ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwnd_, IDC_CLICK_THRU, cfg_.click_through ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwnd_, IDC_WRITE_TEXT, cfg_.write_text ? BST_CHECKED : BST_UNCHECKED);
@@ -137,6 +139,7 @@ void SettingsWindow::read_fields() {
         snprintf(buf, sizeof(buf), "#%02X%06X", (unsigned)(pct * 255 / 100), c & 0xFFFFFF);
         cfg_.bg_color = buf;
     }
+    cfg_.max_lines = std::max(1, std::min(6, edit_int(IDC_MAX_LINES, cfg_.max_lines)));
     cfg_.always_on_top     = IsDlgButtonChecked(hwnd_, IDC_TOP) == BST_CHECKED;
     cfg_.click_through     = IsDlgButtonChecked(hwnd_, IDC_CLICK_THRU) == BST_CHECKED;
     cfg_.write_text        = IsDlgButtonChecked(hwnd_, IDC_WRITE_TEXT) == BST_CHECKED;
@@ -200,7 +203,7 @@ void SettingsWindow::run() {
     RegisterClassExW(&wc);
 
     const int W = LABEL_W + EDIT_W + PAD * 3 + 330; // 560：容纳说明文字与刷新按钮
-    const int H = 13 * ROW_H + 90;
+    const int H = 14 * ROW_H + 90;
     hwnd_ = CreateWindowExW(0, cls, L"LiveSub 设置", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
                             CW_USEDEFAULT, CW_USEDEFAULT, W, H,
                             nullptr, nullptr, hinst, this);
@@ -236,7 +239,12 @@ void SettingsWindow::run() {
     add_edit(h, IDC_BG_COLOR, L"", LABEL_W + PAD, y - ROW_H + 1);
     add_label(h, 0, L"背景透明度%", PAD, next());
     add_edit(h, IDC_BG_ALPHA, L"", LABEL_W + PAD, y - ROW_H + 1);
-    CreateWindowW(L"STATIC", L"0=全透明 100=不透明（默认75）", WS_CHILD | WS_VISIBLE | SS_LEFT,
+    CreateWindowW(L"STATIC", L"0=全透明 100=不透明（默认20）", WS_CHILD | WS_VISIBLE | SS_LEFT,
+                  LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 300, 18, h,
+                  nullptr, GetModuleHandleW(nullptr), nullptr);
+    add_label(h, 0, L"字幕行数", PAD, next());
+    add_edit(h, IDC_MAX_LINES, L"", LABEL_W + PAD, y - ROW_H + 1);
+    CreateWindowW(L"STATIC", L"1-6（默认2：上一句+当前句）", WS_CHILD | WS_VISIBLE | SS_LEFT,
                   LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 300, 18, h,
                   nullptr, GetModuleHandleW(nullptr), nullptr);
     add_label(h, 0, L"位置 %", PAD, next());
