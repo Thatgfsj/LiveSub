@@ -134,9 +134,21 @@ std::string TextMerger::update(const std::string& new_text, bool finalize, int64
     if (current_.empty()) {
         current_ = nt;
     } else {
-        // 前缀一致 → 新窗口更完整，直接用新文本；
-        // 前缀不一致 → 以最新识别为准（旧文本可能是幻觉/过期内容）
-        current_ = nt;
+        // 追加式更新（打字机效果：旧字保留、新字追加，不"一点一点消失"）：
+        //   - 新结果以旧内容开头（更完整）→ 增长
+        //   - 识别回退（旧内容更长）→ 保持已显示内容（不缩回）
+        //   - 完全不同（新句开始）→ 替换
+        const std::string cur_p = strip_punct(current_);
+        const std::string nt_p  = strip_punct(nt);
+        if (nt_p.size() > cur_p.size() &&
+            nt_p.compare(0, cur_p.size(), cur_p) == 0) {
+            current_ = nt; // 追加
+        } else if (cur_p.size() > nt_p.size() &&
+                   cur_p.compare(0, nt_p.size(), nt_p) == 0) {
+            // 识别回退 → 保持（不缩回）
+        } else {
+            current_ = nt; // 完全不同 → 新句
+        }
     }
     return current();
 }
