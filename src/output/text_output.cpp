@@ -43,6 +43,27 @@ static std::string record_filename() {
     return buf;
 }
 
+// 输出文件时间戳（YYYYMMDD_HHMMSS）
+static std::string now_stamp() {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%04d%02d%02d_%02d%02d%02d",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    return buf;
+}
+
+void TextOutput::configure(const Config& c) {
+    cfg_ = c;
+    // 输出文件按时间命名（每次运行生成新文件，便于归档）；仅替换默认路径
+    if (cfg_.write_text && cfg_.text_path == "subtitles.txt") {
+        cfg_.text_path = "字幕_" + now_stamp() + ".txt";
+    }
+    if (cfg_.write_srt && cfg_.srt_path == "subtitles.srt") {
+        cfg_.srt_path = "字幕_" + now_stamp() + ".srt";
+    }
+}
+
 void TextOutput::open_files() {
     if (cfg_.write_text) {
         if (text_file_) { fclose(text_file_); text_file_ = nullptr; }

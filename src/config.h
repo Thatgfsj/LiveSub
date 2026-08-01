@@ -39,7 +39,7 @@ struct Config {
     int   window_w          = 1280;
     int   window_h          = 480;
     int   pos_x             = 960;     // 字幕窗口中心点 X（像素，默认 960 居中）
-    int   pos_y             = 900;     // 字幕窗口中心点 Y（像素，默认 900 贴近屏幕底部）
+    int   pos_y             = 1250;    // 字幕窗口中心点 Y（像素，默认 1250）
     int   max_lines         = 2;       // 固定 2 行：上一句 + 当前句
     bool  always_on_top     = true;
     bool  click_through     = true;    // 鼠标穿透（默认开启，不挡直播操作）
@@ -49,9 +49,9 @@ struct Config {
     int   fps               = 30;
 
     // [output]
-    bool  write_srt         = false;
+    bool  write_srt         = false;    // 写 SRT 字幕（与 write_text 二选一，默认关闭）
     std::string srt_path    = "subtitles.srt";
-    bool  write_text        = true;
+    bool  write_text        = false;    // 写文本文件（默认关闭；讲话稿记录走托盘"开始记录"）
     std::string text_path   = "subtitles.txt";
 
     // [tracks]

@@ -8,7 +8,7 @@
 class TextOutput {
 public:
     struct Config {
-        bool write_text = true;
+        bool write_text = false;   // 写文本文件（默认关闭）
         std::string text_path = "subtitles.txt";
         bool write_srt = false;
         std::string srt_path = "subtitles.srt";

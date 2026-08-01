@@ -26,8 +26,8 @@ enum {
     // 页3 音频
     IDC_DEVICE = 1301, IDC_REFRESH, IDC_MIC_TRACK, IDC_PC_TRACK,
 
-    // 页4 输出
-    IDC_WRITE_TEXT = 1401, IDC_WRITE_SRT,
+    // 页4 输出（radio 三选一：关闭 / 文本 / SRT）
+    IDC_WRITE_NONE = 1401, IDC_WRITE_TEXT, IDC_WRITE_SRT,
 
     // 底部按钮
     IDC_APPLY = 1501, IDC_CLOSE,
@@ -127,10 +127,14 @@ void SettingsWindow::fill_fields() {
     // 页1 字幕
     set_edit(IDC_FONT_SIZE, std::to_wstring((int)cfg_.font_size));
     set_edit(IDC_FONT_COLOR, utf8_to_wide(cfg_.font_color));
-    set_edit(IDC_BG_COLOR, utf8_to_wide(cfg_.bg_color));
     {
+        // 背景颜色框只显示纯色 RGB（#RRGGBB），透明度单独一个框（0-100），
+        // 避免显示合并后的 AARRGGBB（如 #33000000 让人误以为是 33% 黑）
         const auto c = parse_color(cfg_.bg_color).value_or(0xC0000000u);
         const int pct = (int)(((c >> 24) & 0xFF) * 100 / 255);
+        char rgb[16];
+        snprintf(rgb, sizeof(rgb), "#%06X", c & 0xFFFFFF);
+        set_edit(IDC_BG_COLOR, utf8_to_wide(rgb));
         set_edit(IDC_BG_ALPHA, std::to_wstring(pct));
     }
     set_edit(IDC_MAX_LINES, std::to_wstring(cfg_.max_lines));
@@ -157,9 +161,14 @@ void SettingsWindow::fill_fields() {
     CheckDlgButton(hwnd_, IDC_MIC_TRACK, cfg_.mic_enabled ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwnd_, IDC_PC_TRACK, cfg_.pc_enabled ? BST_CHECKED : BST_UNCHECKED);
 
-    // 页4 输出
-    CheckDlgButton(hwnd_, IDC_WRITE_TEXT, cfg_.write_text ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd_, IDC_WRITE_SRT, cfg_.write_srt ? BST_CHECKED : BST_UNCHECKED);
+    // 页4 输出（radio 三选一）
+    if (cfg_.write_srt) {
+        CheckRadioButton(hwnd_, IDC_WRITE_NONE, IDC_WRITE_SRT, IDC_WRITE_SRT);
+    } else if (cfg_.write_text) {
+        CheckRadioButton(hwnd_, IDC_WRITE_NONE, IDC_WRITE_SRT, IDC_WRITE_TEXT);
+    } else {
+        CheckRadioButton(hwnd_, IDC_WRITE_NONE, IDC_WRITE_SRT, IDC_WRITE_NONE);
+    }
 
     // 模型信息（只显示文件名，完整路径太长会截断）
     auto basename = [](const std::string& p) {
@@ -204,7 +213,7 @@ void SettingsWindow::read_fields() {
     cfg_.max_lines = std::max(1, std::min(6, edit_int(IDC_MAX_LINES, cfg_.max_lines)));
     cfg_.stroke_enabled = IsDlgButtonChecked(hwnd_, IDC_STROKE) == BST_CHECKED;
     cfg_.stroke_color   = edit_str(IDC_STROKE_COLOR);
-    cfg_.stroke_width   = std::max(0, std::min(8, edit_int(IDC_STROKE_W, cfg_.stroke_width)));
+    cfg_.stroke_width   = std::max(0, std::min(3, edit_int(IDC_STROKE_W, cfg_.stroke_width))); // 0=关闭描边
     cfg_.always_on_top     = IsDlgButtonChecked(hwnd_, IDC_TOP) == BST_CHECKED;
     cfg_.click_through     = IsDlgButtonChecked(hwnd_, IDC_CLICK_THRU) == BST_CHECKED;
 
@@ -223,7 +232,7 @@ void SettingsWindow::read_fields() {
     cfg_.mic_enabled = IsDlgButtonChecked(hwnd_, IDC_MIC_TRACK) == BST_CHECKED;
     cfg_.pc_enabled  = IsDlgButtonChecked(hwnd_, IDC_PC_TRACK) == BST_CHECKED;
 
-    // 页4 输出
+    // 页4 输出（radio：关闭/文本/SRT 二选一）
     cfg_.write_text = IsDlgButtonChecked(hwnd_, IDC_WRITE_TEXT) == BST_CHECKED;
     cfg_.write_srt  = IsDlgButtonChecked(hwnd_, IDC_WRITE_SRT) == BST_CHECKED;
 }
@@ -240,7 +249,7 @@ void SettingsWindow::show_page(int page) {
         {IDC_FONT_SIZE, IDC_CLICK_THRU},
         {IDC_VAD_THRESH, IDC_MODEL_INFO},
         {IDC_DEVICE, IDC_PC_TRACK},
-        {IDC_WRITE_TEXT, IDC_WRITE_SRT},
+        {IDC_WRITE_NONE, IDC_WRITE_SRT},
     };
     for (int i = 0; i < 4; i++) {
         const bool vis = (i == page);
@@ -415,14 +424,14 @@ void SettingsWindow::run() {
     CreateWindowW(L"BUTTON", L"文字描边", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                   c1, row1(5), S(96), S(22), h, (HMENU)(INT_PTR)IDC_STROKE, hinst, nullptr);
     add_edit(h, IDC_STROKE_COLOR, c1e, row1(5));
-    add_label(h, L"描边粗(1-8)", c1, row1(6));
+    add_label(h, L"描边粗(0-3)", c1, row1(6));
     add_edit(h, IDC_STROKE_W, c1e, row1(6));
 
-    add_label(h, L"位置X(中心)", c2, row1(0));
+    add_label(h, L"横坐标(默认960)", c2, row1(0));
     add_edit(h, IDC_WIN_X, c2e, row1(0));
-    add_label(h, L"位置Y(中心)", c2, row1(1));
+    add_label(h, L"竖坐标(默认1250)", c2, row1(1));
     add_edit(h, IDC_WIN_Y, c2e, row1(1));
-    add_hint(h, L"X=960 居中，Y=900 靠底", c2 + S(8), row1(3));
+    add_hint(h, L"字幕中心点像素坐标", c2 + S(8), row1(3));
     CreateWindowW(L"BUTTON", L"置顶", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                   c2, row1(2), S(100), S(22), h, (HMENU)(INT_PTR)IDC_TOP, hinst, nullptr);
     CreateWindowW(L"BUTTON", L"点击穿透", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
@@ -466,14 +475,16 @@ void SettingsWindow::run() {
     add_hint(h, L"两条字幕共用同一展示框，一般不同时开启；也可在托盘右键快速切换",
              c1, row1(3));
 
-    // ================= 页4 输出（单列） =================
+    // ================= 页4 输出（单列）：radio 三选一，默认关闭 =================
     g_cur_page = 3;
-    CreateWindowW(L"BUTTON", L"写文本文件", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                  c1, row1(0), S(120), S(22), h, (HMENU)(INT_PTR)IDC_WRITE_TEXT, hinst, nullptr);
-    add_hint(h, L"每次定稿句追加到 subtitles.txt", c1 + S(130), row1(0));
-    CreateWindowW(L"BUTTON", L"写 SRT 字幕", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                  c1, row1(1), S(120), S(22), h, (HMENU)(INT_PTR)IDC_WRITE_SRT, hinst, nullptr);
-    add_hint(h, L"带时间轴的 subtitles.srt", c1 + S(130), row1(1));
+    CreateWindowW(L"BUTTON", L"不输出", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+                  c1, row1(0), S(90), S(22), h, (HMENU)(INT_PTR)IDC_WRITE_NONE, hinst, nullptr);
+    CreateWindowW(L"BUTTON", L"文本文件", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+                  c1 + S(100), row1(0), S(110), S(22), h, (HMENU)(INT_PTR)IDC_WRITE_TEXT, hinst, nullptr);
+    CreateWindowW(L"BUTTON", L"SRT 字幕", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+                  c1 + S(220), row1(0), S(110), S(22), h, (HMENU)(INT_PTR)IDC_WRITE_SRT, hinst, nullptr);
+    add_hint(h, L"文本/SRT 二选一，默认关闭；文件按时间命名（如 字幕_20260801_153000.txt）",
+             c1, row1(1));
     add_hint(h, L"讲话稿记录（按时间命名存到桌面）在托盘菜单开启", c1, row1(3));
 
     // ---- 底部按钮 ----

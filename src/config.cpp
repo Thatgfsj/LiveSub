@@ -176,7 +176,7 @@ Config Config::load(const std::string& path) {
     c.bg_color           = get_str(kv, "ui.bg_color", c.bg_color);
     c.stroke_enabled     = get_bool(kv, "ui.stroke_enabled", c.stroke_enabled);
     c.stroke_color       = get_str(kv, "ui.stroke_color", c.stroke_color);
-    c.stroke_width       = std::max(0, get_int(kv, "ui.stroke_width", c.stroke_width));
+    c.stroke_width       = std::max(0, std::min(3, get_int(kv, "ui.stroke_width", c.stroke_width))); // 0-3，0=关闭
     c.window_w           = get_int(kv, "ui.window_w", c.window_w);
     c.window_h           = get_int(kv, "ui.window_h", c.window_h);
     c.pos_x              = get_int(kv, "ui.pos_x", c.pos_x);
