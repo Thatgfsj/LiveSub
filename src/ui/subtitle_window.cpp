@@ -161,8 +161,8 @@ void SubtitleWindow::apply_style() {
             style_.font_size, L"zh-CN", &text_format_);
         if (text_format_) {
             text_format_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-            // 底部对齐：行数超出时被裁的是顶部旧内容，最新字幕始终可见
-            text_format_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_FAR);
+            // 垂直居中：字幕在窗口内居中显示（默认 2 句场景窗口高度充足）
+            text_format_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         }
     }
     layout_dirty_ = true;
@@ -263,9 +263,10 @@ void SubtitleWindow::set_status(const std::string& status) {
     layout_dirty_ = true;
 }
 
-// 构建文本布局：仅对【超长的单句】（不含显式换行）逐级缩小字号
-// （避免"第二行孤字"）；多句文本不缩字号，不砍句——句子完整性由
-// TextMerger 保证（只输出最近 N 句），超行时靠底部对齐保留最新内容
+// 构建文本布局：
+//   1. 行数超过 max_lines（默认 2）时逐级缩小字号（最多 50%），让内容两行放下
+//      （TextMerger 已限制为最近 N 句，因此短句两行不会误缩）
+//   2. 缩到最小仍超行（极端长文本）→ 滚动保留最后 max_lines 行（兜底）
 void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) {
     if (layout_) { layout_->Release(); layout_ = nullptr; }
     if (!dwrite_factory_ || !text_format_ || text.empty()) return;
@@ -285,17 +286,38 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
     IDWriteTextLayout* l = make(text);
     if (!l) return;
 
-    const bool multi_line_text = text.find(L'\n') != std::wstring::npos;
+    // 1. 字号自适应：超行逐级缩小，直到两行放下或最小字号
     float size = style_.font_size;
-    if (!multi_line_text) {
-        for (int attempt = 0; attempt < 14; attempt++) {
-            DWRITE_TEXT_RANGE range = {0, (UINT32)text.size()};
-            l->SetFontSize(size, range);
-            UINT32 lines = 0;
-            l->GetLineMetrics(nullptr, 0, &lines);
-            if (lines <= max || size <= min_size) break;
-            size *= 0.92f;
-        }
+    UINT32 lines = 0;
+    for (int attempt = 0; attempt < 14; attempt++) {
+        DWRITE_TEXT_RANGE range = {0, (UINT32)text.size()};
+        l->SetFontSize(size, range);
+        lines = 0;
+        l->GetLineMetrics(nullptr, 0, &lines);
+        if (lines <= max || size <= min_size) break;
+        size *= 0.92f;
+    }
+    if (lines <= max) {
+        layout_ = l;
+        return;
+    }
+
+    // 2. 最小字号仍超行 → 滚动保留最后 max 行（兜底，极端长文本）
+    std::vector<DWRITE_LINE_METRICS> metrics(lines);
+    l->GetLineMetrics(metrics.data(), lines, &lines);
+    UINT32 skip_chars = 0;
+    for (UINT32 i = 0; i < lines - max; i++) {
+        skip_chars += metrics[i].length;
+    }
+    while (skip_chars > 0 && skip_chars < text.size() &&
+           (text[skip_chars] & 0xFC00) == 0xDC00) {
+        skip_chars--;
+    }
+    l->Release();
+    l = make(text.substr(skip_chars));
+    if (l) {
+        DWRITE_TEXT_RANGE range = {0, (UINT32)text.size() - skip_chars};
+        l->SetFontSize(size, range);
     }
     layout_ = l;
 }
