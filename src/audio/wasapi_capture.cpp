@@ -103,16 +103,23 @@ bool WasapiCapture::start(const Config& cfg, std::string* err) {
                           __uuidof(IMMDeviceEnumerator), (void**)&enumerator_);
     if (!com_ok(hr)) return fail("无法创建设备枚举器");
 
+    const EDataFlow flow = cfg_.loopback ? eRender : eCapture;
     if (cfg_.device_id.empty()) {
-        hr = enumerator_->GetDefaultAudioEndpoint(eCapture, eCommunications, &device_);
-        if (!com_ok(hr)) {
-            hr = enumerator_->GetDefaultAudioEndpoint(eCapture, eConsole, &device_);
+        if (cfg_.loopback) {
+            // 电脑声音：默认输出设备 + loopback
+            hr = enumerator_->GetDefaultAudioEndpoint(eRender, eConsole, &device_);
+            if (!com_ok(hr)) return fail("无法获取默认输出设备（电脑声音）");
+        } else {
+            hr = enumerator_->GetDefaultAudioEndpoint(eCapture, eCommunications, &device_);
+            if (!com_ok(hr)) {
+                hr = enumerator_->GetDefaultAudioEndpoint(eCapture, eConsole, &device_);
+            }
+            if (!com_ok(hr)) return fail("无法获取默认麦克风（请检查输入设备）");
         }
-        if (!com_ok(hr)) return fail("无法获取默认麦克风（请检查输入设备）");
     } else {
         // 按 ID 精确匹配，失败则按名称模糊匹配
         IMMDeviceCollection* coll = nullptr;
-        if (com_ok(enumerator_->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &coll))) {
+        if (com_ok(enumerator_->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &coll))) {
             UINT n = 0;
             coll->GetCount(&n);
             std::wstring target = wide_from_utf8(cfg_.device_id);
@@ -175,8 +182,10 @@ bool WasapiCapture::start(const Config& cfg, std::string* err) {
     }
 
     const REFERENCE_TIME buf_duration = 200000; // 20ms 共享缓冲
+    DWORD stream_flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
+    if (cfg_.loopback) stream_flags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
     hr = audio_client_->Initialize(AUDCLNT_SHAREMODE_SHARED,
-                                   AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                   stream_flags,
                                    buf_duration, 0, wf, nullptr);
     CoTaskMemFree(wf);
     if (!com_ok(hr)) {

@@ -14,6 +14,8 @@ public:
     // 回调
     std::function<void()> on_open_settings;
     std::function<void()> on_toggle_window;   // 显示/隐藏字幕窗
+    std::function<void()> on_toggle_mic;      // 麦克风字幕开关
+    std::function<void()> on_toggle_pc;       // 电脑字幕开关
     std::function<void()> on_toggle_record;   // 开始/结束记录讲话稿
     std::function<void()> on_toggle_voice;    // 开启/关闭语音输入
     std::function<void()> on_quit;
@@ -25,6 +27,10 @@ public:
     // 语音输入状态（菜单项显示"开启/关闭语音输入"）
     void set_voice_input(bool v) { voice_input_ = v; }
     bool voice_input() const { return voice_input_; }
+
+    // 双轨状态
+    void set_mic_enabled(bool v) { mic_enabled_ = v; }
+    void set_pc_enabled(bool v)  { pc_enabled_ = v; }
 
     bool create(const std::wstring& tip);
     void set_state(State s, const std::wstring& tip = L"");
@@ -42,5 +48,7 @@ private:
     bool added_ = false;
     bool recording_ = false;
     bool voice_input_ = false;
+    bool mic_enabled_ = true;
+    bool pc_enabled_ = false;
     State state_ = State::Loading;
 };

@@ -20,8 +20,9 @@ struct IAudioCaptureClient;
 class WasapiCapture {
 public:
     struct Config {
-        std::string device_id;   // 空 = 默认输入设备；也可填设备名做模糊匹配
+        std::string device_id;   // 空 = 默认设备（输入/输出，取决于 loopback）
         float boost_db = 0.0f;   // 增益补偿（dB）
+        bool loopback = false;   // true = 采集系统输出（电脑声音）；false = 麦克风
     };
 
     // on_audio(pcm, n_samples, t_ms)：t_ms 为单调时钟毫秒

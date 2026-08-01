@@ -174,6 +174,9 @@ Config Config::load(const std::string& path) {
     c.font_size          = get_float(kv, "ui.font_size", c.font_size);
     c.font_color         = get_str(kv, "ui.font_color", c.font_color);
     c.bg_color           = get_str(kv, "ui.bg_color", c.bg_color);
+    c.stroke_enabled     = get_bool(kv, "ui.stroke_enabled", c.stroke_enabled);
+    c.stroke_color       = get_str(kv, "ui.stroke_color", c.stroke_color);
+    c.stroke_width       = std::max(0, get_int(kv, "ui.stroke_width", c.stroke_width));
     c.window_w           = get_int(kv, "ui.window_w", c.window_w);
     c.window_h           = get_int(kv, "ui.window_h", c.window_h);
     c.pos_x              = get_int(kv, "ui.pos_x", c.pos_x);
@@ -190,6 +193,13 @@ Config Config::load(const std::string& path) {
     c.srt_path           = get_str(kv, "output.srt_path", c.srt_path);
     c.write_text         = get_bool(kv, "output.write_text", c.write_text);
     c.text_path          = get_str(kv, "output.text_path", c.text_path);
+
+    c.mic_enabled        = get_bool(kv, "tracks.mic_enabled", c.mic_enabled);
+    c.mic_pos_x          = get_int(kv, "tracks.mic_pos_x", c.mic_pos_x);
+    c.mic_pos_y          = get_int(kv, "tracks.mic_pos_y", c.mic_pos_y);
+    c.pc_enabled         = get_bool(kv, "tracks.pc_enabled", c.pc_enabled);
+    c.pc_pos_x           = get_int(kv, "tracks.pc_pos_x", c.pc_pos_x);
+    c.pc_pos_y           = get_int(kv, "tracks.pc_pos_y", c.pc_pos_y);
 
     c.log_level          = get_int(kv, "log.log_level", c.log_level);
     return c;
@@ -228,6 +238,9 @@ void Config::save(const std::string& path) const {
     w("font_size = " + std::to_string(font_size));
     w("font_color = " + font_color);
     w("bg_color = " + bg_color);
+    w("stroke_enabled = " + std::string(stroke_enabled ? "true" : "false"));
+    w("stroke_color = " + stroke_color);
+    w("stroke_width = " + std::to_string(stroke_width));
     w("window_w = " + std::to_string(window_w));
     w("window_h = " + std::to_string(window_h));
     w("pos_x = " + std::to_string(pos_x));
@@ -245,6 +258,14 @@ void Config::save(const std::string& path) const {
     w("srt_path = " + srt_path);
     w("write_text = " + std::string(write_text ? "true" : "false"));
     w("text_path = " + text_path);
+    w("");
+    w("[tracks]");
+    w("mic_enabled = " + std::string(mic_enabled ? "true" : "false"));
+    w("mic_pos_x = " + std::to_string(mic_pos_x));
+    w("mic_pos_y = " + std::to_string(mic_pos_y));
+    w("pc_enabled = " + std::string(pc_enabled ? "true" : "false"));
+    w("pc_pos_x = " + std::to_string(pc_pos_x));
+    w("pc_pos_y = " + std::to_string(pc_pos_y));
     w("");
     w("[log]");
     w("log_level = " + std::to_string(log_level));

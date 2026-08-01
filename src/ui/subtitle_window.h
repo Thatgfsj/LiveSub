@@ -33,6 +33,9 @@ public:
         int fps = 30;
         int fade_in_ms  = 300;           // 字幕出现渐入时长
         int fade_out_ms = 500;           // 字幕消失渐出时长
+        bool stroke_enabled = true;      // 文字描边（艺术字效果）
+        DWORD stroke_color  = 0xFF000000; // 描边颜色 AARRGGBB（默认黑）
+        int stroke_width    = 2;         // 描边粗细（像素）
     };
 
     bool create(const Style& s, std::wstring* err = nullptr);
@@ -64,6 +67,7 @@ private:
     ID2D1SolidColorBrush* bg_brush_ = nullptr;
     ID2D1SolidColorBrush* text_brush_ = nullptr;
     ID2D1SolidColorBrush* interim_brush_ = nullptr; // interim 半透明样式
+    ID2D1SolidColorBrush* stroke_brush_ = nullptr;  // 描边色（默认黑）
     IDWriteFactory* dwrite_factory_ = nullptr;
     IDWriteTextFormat* text_format_ = nullptr;
     IDWriteTextLayout* layout_ = nullptr; // 布局缓存

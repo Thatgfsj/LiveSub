@@ -1,10 +1,11 @@
 #pragma once
-// 应用主类：编排 采集线程 → VAD → 分窗队列 → ASR 线程 → 字幕窗口
+// 应用主类：双字幕管线（麦克风 / 电脑声音）共享单个 ASR 引擎（显存一份）
+// 采集线程×2 → VAD×2 → 分窗队列×2 → 单 ASR 线程串行识别 → 字幕窗口×2
 #include <atomic>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
-#include <memory>
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -24,6 +25,32 @@
 #include "output/text_output.h"
 #include "input/voice_input.h"
 
+// 一条字幕管线（采集→VAD→队列→合并→窗口）
+struct AsrPipeline {
+    std::string name;                      // 显示名（"麦克风"/"电脑声音"）
+    std::atomic<bool> enabled{false};
+
+    // 采集（采集线程）
+    WasapiCapture capture;
+    Resampler* resampler = nullptr;
+    Vad* vad = nullptr;
+    AudioQueue* queue = nullptr;
+    std::vector<float> resample_buf;
+
+    // 共享状态（采集线程写 / ASR 线程读）
+    std::atomic<bool> speaking{false};
+    std::atomic<bool> finalize_pending{false};
+    std::atomic<size_t> seg_start{0};
+    std::atomic<size_t> seg_end{0};
+    std::atomic<size_t> last_processed{0};
+
+    // 识别与显示
+    TextMerger merger;
+    SubtitleWindow window;
+    std::vector<float> win_buf;
+    TextOutput output;
+};
+
 // 小工具
 inline int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -37,77 +64,60 @@ public:
     App(const App&) = delete;
     App& operator=(const App&) = delete;
 
-    // 初始化（加载配置、创建窗口、启动线程）；失败返回 false
     bool init(const std::string& config_path, bool enable_capture = true);
     void run();       // Win32 消息循环（主线程）
     void shutdown();
 
-    // 用 wav 文件模拟麦克风流（实时节奏回放，验证流式链路），完成后自动退出
-    bool run_wav_test(const std::string& wav_path);
-
-    // 打开设置窗（模态）
     void open_settings();
-
-    // 重新加载配置并应用（设置窗"应用"时调用）
     void apply_config();
 
+    // 用 wav 模拟麦克风流（测试）
+    bool run_wav_test(const std::string& wav_path);
+
+    // 切换管线开关（托盘调用）
+    void toggle_pipeline(AsrPipeline& p, bool enable);
+
 private:
-    // 采集线程回调（高频）
-    void on_audio(const float* pcm, size_t n, int64_t t_ms);
-    // ASR 线程主循环
+    // 采集回调（高频，运行在采集线程）
+    void on_audio(AsrPipeline& p, const float* pcm, size_t n, int64_t t_ms);
+
+    // ASR 线程主循环（共享单引擎，串行处理两条管线）
     void asr_loop();
+    // 处理一条管线的当前窗口；返回是否识别了一窗
+    bool process_pipeline(AsrPipeline& p);
+    // 管线启停（start_capture=false 时只建识别链不采集，供 wav 测试）
+    bool start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture = true);
+    void stop_pipeline(AsrPipeline& p);
 
     Config cfg_;
 
-    // 采集（主线程创建，回调在采集线程）
-    WasapiCapture capture_;
-    Resampler* resampler_ = nullptr;      // 48k→16k
-    Vad* vad_ = nullptr;
-    AudioQueue* queue_ = nullptr;
+    // 两条字幕管线
+    AsrPipeline mic_;   // 麦克风字幕（默认开）
+    AsrPipeline pc_;    // 电脑字幕（默认关）
 
-    // 识别（ASR 线程）
+    // 共享单引擎（显存一份），ASR 线程串行使用
     AsrEngine asr_;
-    TextMerger merger_;
+    std::mutex asr_mtx_;
+
     std::thread asr_thread_;
     std::atomic<bool> asr_running_{false};
 
-    // 字幕（主线程）
-    SubtitleWindow window_;
-    TextOutput output_;
+    // 托盘
     TrayIcon tray_;
     bool tray_ready_ = false;
+    void update_tray(TrayIcon::State s, const std::string& tip);
 
     // 语音输入（开启后定稿句注入当前焦点窗口）
     VoiceInput voice_input_;
 
-    // 托盘状态同步
-    void update_tray(TrayIcon::State s, const std::string& tip);
-
-    // 共享状态
-    std::atomic<bool> speaking_{false};       // VAD 语音中
-    std::atomic<bool> finalize_pending_{false}; // 静音到达，请求定稿
-    std::vector<float> resample_buf_;
-    std::vector<float> win_buf_;
-
-    // 状态栏文本
-    std::string status_text_;
-
-    // 日志文件（livesub.log）
+    // 日志
     FILE* log_file_ = nullptr;
     void logf(const char* fmt, ...);
 
-    // 电平显示节流
     int64_t last_level_ms_ = 0;
-    float last_level_db_ = -100.0f;
 
-    // ASR 线程心跳（检测识别引擎挂起）
+    // ASR 心跳
     std::atomic<int64_t> last_asr_heartbeat_ms_{0};
-    std::atomic<int64_t> last_finalize_ms_{0};   // 上次定稿时间
-    std::atomic<size_t> seg_start_total_{0};     // 当前语音段起点（VAD 分段驱动识别）
-    std::atomic<size_t> seg_end_total_{0};       // 语音段结束点（on_speech_end 记录，定稿窗口终点）
-    std::atomic<size_t> last_processed_total_{0}; // 上次已识别到的音频位置（超时醒来跳过重复）
-    size_t last_seg_start_ = 0;                  // 上次处理的语音段起点（ASR 线程私有）
 
-    // 关闭幂等保护
     std::atomic<bool> shutdown_done_{false};
 };

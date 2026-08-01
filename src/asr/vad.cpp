@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <cstdio>
 
 Vad::Vad(const Params& p) : p_(p) { reset(); }
 

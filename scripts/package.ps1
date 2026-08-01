@@ -103,6 +103,9 @@ font_family = Microsoft YaHei UI
 font_size = 42.000000
 font_color = #FFFFFF
 bg_color = #33000000
+stroke_enabled = true
+stroke_color = #000000
+stroke_width = 2
 window_w = 1280
 window_h = 260
 pos_x = 50
@@ -120,6 +123,14 @@ write_srt = false
 srt_path = subtitles.srt
 write_text = true
 text_path = subtitles.txt
+
+[tracks]
+mic_enabled = true
+mic_pos_x = 50
+mic_pos_y = 85
+pc_enabled = false
+pc_pos_x = 50
+pc_pos_y = 45
 
 [log]
 log_level = 1

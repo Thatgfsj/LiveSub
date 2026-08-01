@@ -32,6 +32,9 @@ struct Config {
     float font_size         = 42.0f;
     std::string font_color  = "#FFFFFF";
     std::string bg_color    = "#33000000"; // AARRGGBB 半透明黑（透明度 20%）
+    bool  stroke_enabled    = true;     // 文字描边（艺术字效果）
+    std::string stroke_color = "#000000"; // 描边颜色（默认黑色）
+    int   stroke_width     = 2;        // 描边粗细（像素）
     int   window_w          = 1280;
     int   window_h          = 260;
     int   pos_x             = 50;      // 水平位置（屏幕宽百分比 0-100，50=居中，越大越靠右）
@@ -49,6 +52,14 @@ struct Config {
     std::string srt_path    = "subtitles.srt";
     bool  write_text        = true;
     std::string text_path   = "subtitles.txt";
+
+    // [tracks]
+    bool mic_enabled        = true;    // 麦克风字幕（默认开）
+    int  mic_pos_x          = 50;      // 麦克风字幕位置（屏幕百分比）
+    int  mic_pos_y          = 85;
+    bool pc_enabled         = false;   // 电脑字幕（默认关：识别电脑播放的声音）
+    int  pc_pos_x           = 50;
+    int  pc_pos_y           = 45;
 
     // [log]
     int  log_level          = 1;       // 0=quiet 1=info 2=debug
