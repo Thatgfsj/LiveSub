@@ -93,6 +93,11 @@ static int http_get_to_file(const std::string& url, uint64_t resume_from,
         total = expected_size; // 服务端未知总长：用期望大小显示进度
     }
 
+    // 服务端不支持 Range（返回 200 全量）→ 从头重写，避免追加写坏文件
+    if (status == 200 && resume_from > 0) {
+        resume_from = 0;
+    }
+
     // 边读边写（续传模式）
     FILE* fp = fopen(path.c_str(), resume_from > 0 ? "ab" : "wb");
     if (!fp) { WinHttpCloseHandle(req); WinHttpCloseHandle(con); WinHttpCloseHandle(ses);
@@ -135,35 +140,41 @@ int download_file(const DownloadFile& f,
                   const std::function<bool(uint64_t, uint64_t)>& on_progress,
                   std::string* err) {
     const std::vector<std::string> sources = { f.url, f.mirror };
+    std::string last_err;
 
-    for (const auto& src : sources) {
-        if (src.empty()) continue;
-        // 已下载部分（断点续传）
-        uint64_t resume_from = 0;
-        FILE* fp = fopen(f.path.c_str(), "rb");
-        if (fp) {
-            _fseeki64(fp, 0, SEEK_END);
-            const long long sz = _ftelli64(fp);
-            if (sz > 0) resume_from = (uint64_t)sz;
-            fclose(fp);
-        }
-        if (f.expected_size > 0 && resume_from >= f.expected_size) {
-            return 0; // 已完成
-        }
+    // 每源最多尝试次数（断线自动续传重试；两源轮换，适配不同网络环境）
+    const int kAttemptsPerSource = 4;
+    for (int attempt = 0; attempt < kAttemptsPerSource; attempt++) {
+        for (const auto& src : sources) {
+            if (src.empty()) continue;
+            // 已下载部分（断点续传）
+            uint64_t resume_from = 0;
+            FILE* fp = fopen(f.path.c_str(), "rb");
+            if (fp) {
+                _fseeki64(fp, 0, SEEK_END);
+                const long long sz = _ftelli64(fp);
+                if (sz > 0) resume_from = (uint64_t)sz;
+                fclose(fp);
+            }
+            // 已下载大小超过预期 → 文件损坏，删除重下
+            if (f.expected_size > 0 && resume_from > f.expected_size) {
+                remove(f.path.c_str());
+                resume_from = 0;
+            }
+            if (f.expected_size > 0 && resume_from >= f.expected_size) {
+                return 0; // 已完成
+            }
 
-        int rc = http_get_to_file(src, resume_from, f.path, f.expected_size,
-                                  on_progress, err, 5);
-        if (rc == 0) return 0;
-        if (rc == 1) {
-            // 未完成 → 重试续传
-            if (err) err->clear();
-            continue;
+            std::string one_err;
+            int rc = http_get_to_file(src, resume_from, f.path, f.expected_size,
+                                      on_progress, &one_err, 5);
+            if (rc == 0) return 0;
+            last_err = one_err.empty() ? "网络中断" : one_err;
+            fprintf(stderr, "[dl] %s <- %s 失败: %s\n",
+                    f.path.c_str(), src.c_str(), last_err.c_str());
+            // rc==1 未完成 / rc==-1 失败 → 换镜像继续（断点续传）
         }
-        if (err && !err->empty()) {
-            fprintf(stderr, "[dl] %s 失败: %s\n", f.path.c_str(), err->c_str());
-            err->clear();
-        }
-        // rc == -1 → 换镜像
     }
-    return -1; // 所有源失败
+    if (err) *err = last_err;
+    return -1; // 所有源、所有尝试均失败
 }

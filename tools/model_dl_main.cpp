@@ -14,6 +14,15 @@
 
 #include "tools/model_downloader.h"
 
+// UTF-8 → UTF-16（错误信息显示）
+static std::wstring utf8_to_wide(const std::string& s) {
+    if (s.empty()) return L"";
+    const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    std::wstring w((size_t)n - 1, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), n);
+    return w;
+}
+
 static const char* kBaseMir = "https://hf-mirror.com/ggml-org/";
 static const char* kBaseHf  = "https://huggingface.co/ggml-org/";
 static const char* kRepo    = "Qwen3-ASR-1.7B-GGUF/resolve/main/";
@@ -57,10 +66,12 @@ static void download_worker(const std::string& model_dir, const ModelChoice& mc,
     const wchar_t* names[] = { L"主模型", L"音频编码器" };
 
     bool all_ok = true;
+    std::string last_err;
     for (int i = 0; i < 2; i++) {
         set_status(std::wstring(L"正在下载 ") + names[i] + L" ...");
         int rc = 0;
-        for (int retry = 0; retry < 8 && !g_cancel; retry++) {
+        for (int retry = 0; retry < 3 && !g_cancel; retry++) {
+            std::string dl_err;
             rc = download_file(files[i],
                 [](uint64_t done, uint64_t total) -> bool {
                     if (g_cancel) return false;
@@ -80,15 +91,18 @@ static void download_worker(const std::string& model_dir, const ModelChoice& mc,
                         SetWindowTextW(g_status, buf);
                     }
                     return true;
-                }, nullptr);
+                }, &dl_err);
             if (rc == 0) break;
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            last_err = dl_err.empty() ? "网络中断" : dl_err;
+            // 退避重试：2s / 4s（下载器内部已对两个镜像各重试多次）
+            std::this_thread::sleep_for(std::chrono::seconds(2 * (retry + 1)));
         }
         if (rc != 0) { all_ok = false; break; }
         SendMessageW(g_progress, PBM_SETPOS, 100, 0);
     }
 
-    set_status(all_ok ? L"模型下载完成！可以关闭本窗口" : L"下载失败，请检查网络后重新运行");
+    set_status(all_ok ? L"模型下载完成！可以关闭本窗口"
+                      : L"下载失败：" + utf8_to_wide(last_err) + L"  （请检查网络后重新运行）");
     EnableWindow(g_done, TRUE);
     if (all_ok) SetFocus(g_done);
 }
