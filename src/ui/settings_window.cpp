@@ -58,10 +58,10 @@ static HWND add_edit(HWND parent, int id, int x, int y) {
                          x, y, EDIT_W, 22, parent, (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
 }
 
-// 说明文字（灰色小字）
+// 说明文字（灰色小字，宽度自适应不超窗）
 static void add_hint(HWND parent, const wchar_t* text, int x, int y) {
     CreateWindowW(L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT,
-                  x, y + 4, 260, 18, parent, nullptr, GetModuleHandleW(nullptr), nullptr);
+                  x, y + 4, 240, 18, parent, nullptr, GetModuleHandleW(nullptr), nullptr);
 }
 
 static std::wstring get_edit_text(HWND hwnd) {
@@ -304,6 +304,10 @@ LRESULT CALLBACK SettingsWindow::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
 }
 
 void SettingsWindow::run() {
+    // Tab 控件需要 comctl32 初始化（否则 WC_TABCONTROLW 创建失败，界面崩坏）
+    INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_TAB_CLASSES };
+    InitCommonControlsEx(&icc);
+
     const wchar_t* cls = L"LiveSubSettingsWindow";
     HINSTANCE hinst = GetModuleHandleW(nullptr);
     WNDCLASSEXW wc = {};
@@ -373,12 +377,12 @@ void SettingsWindow::run() {
     add_edit(h, IDC_WIN_X, c2e, row1(0));
     add_label(h, L"位置Y(中心)", c2, row1(1));
     add_edit(h, IDC_WIN_Y, c2e, row1(1));
-    add_hint(h, L"像素坐标；X=960 居中，Y=900 贴近底部", c2e + EDIT_W + 8, row1(1));
+    add_hint(h, L"像素坐标；X=960 居中，Y=900 贴近底部", c2 + 8, row1(3));
     CreateWindowW(L"BUTTON", L"置顶", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                   c2, row1(2), 100, 22, h, (HMENU)(INT_PTR)IDC_TOP, hinst, nullptr);
     CreateWindowW(L"BUTTON", L"点击穿透", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                   c2 + 110, row1(2), 110, 22, h, (HMENU)(INT_PTR)IDC_CLICK_THRU, hinst, nullptr);
-    add_hint(h, L"穿透后鼠标可正常操作直播软件", c2e + EDIT_W + 8, row1(3));
+    add_hint(h, L"穿透后鼠标可正常操作直播软件", c2 + 8, row1(4));
 
     // ================= 页2 识别（单列） =================
     add_label(h, L"VAD 阈值(dB)", c1, row1(0));

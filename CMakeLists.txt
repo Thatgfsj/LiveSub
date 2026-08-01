@@ -87,6 +87,7 @@ if(WIN32)
         dwmapi
         d2d1 dwrite
         windowscodecs
+        comctl32
     )
     target_compile_definitions(livesub PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
