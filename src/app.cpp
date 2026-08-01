@@ -200,8 +200,8 @@ bool App::init(const std::string& config_path, bool enable_capture) {
         const std::string log_path = resolve_path("livesub.log");
         FILE* f = fopen(log_path.c_str(), "rb");
         if (f) {
-            fseek(f, 0, SEEK_END);
-            const long sz = ftell(f);
+            _fseeki64(f, 0, SEEK_END);
+            const long long sz = _ftelli64(f);
             fclose(f);
             if (sz > 2 * 1024 * 1024) remove(log_path.c_str());
         }

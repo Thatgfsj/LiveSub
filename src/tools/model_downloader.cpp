@@ -142,8 +142,9 @@ int download_file(const DownloadFile& f,
         uint64_t resume_from = 0;
         FILE* fp = fopen(f.path.c_str(), "rb");
         if (fp) {
-            fseek(fp, 0, SEEK_END);
-            resume_from = (uint64_t)ftell(fp);
+            _fseeki64(fp, 0, SEEK_END);
+            const long long sz = _ftelli64(fp);
+            if (sz > 0) resume_from = (uint64_t)sz;
             fclose(fp);
         }
         if (f.expected_size > 0 && resume_from >= f.expected_size) {

@@ -76,15 +76,15 @@ int main() {
     // 模型检测：缺失/不完整 → 提示启动下载器
     {
         const std::string mp = resolve_path("model");
-        const std::string main_f = mp + "\Qwen3-ASR-1.7B-Q8_0.gguf";
-        const std::string sml_f  = mp + "\Qwen3-ASR-0.6B-Q8_0.gguf";
-        const std::string proj_f = mp + "\mmproj-Qwen3-ASR-1.7B-bf16.gguf";
+        const std::string main_f = mp + "\\Qwen3-ASR-1.7B-Q8_0.gguf";
+        const std::string sml_f  = mp + "\\Qwen3-ASR-0.6B-Q8_0.gguf";
+        const std::string proj_f = mp + "\\mmproj-Qwen3-ASR-1.7B-bf16.gguf";
         bool has_model = false;
         FILE* f = fopen(main_f.c_str(), "rb");
-        if (f) { fseek(f, 0, SEEK_END); has_model = ftell(f) > 1000000000; fclose(f); }
+        if (f) { _fseeki64(f, 0, SEEK_END); has_model = _ftelli64(f) > 1000000000; fclose(f); }
         if (!has_model) {
             f = fopen(sml_f.c_str(), "rb");
-            if (f) { fseek(f, 0, SEEK_END); has_model = ftell(f) > 500000000; fclose(f); }
+            if (f) { _fseeki64(f, 0, SEEK_END); has_model = _ftelli64(f) > 500000000; fclose(f); }
         }
         (void)proj_f;
         if (!has_model && wav_test.empty()) {
