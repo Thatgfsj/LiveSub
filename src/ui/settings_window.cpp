@@ -287,16 +287,19 @@ LRESULT CALLBACK SettingsWindow::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
         }
         case WM_GETMINMAXINFO: {
             // 最小尺寸 = 初始窗口尺寸（缩到初始为止，内容不会挤乱）
+            // 注意：窗口创建期间（WM_CREATE 前）就会收到此消息，self 可能为空
             MINMAXINFO* mmi = (MINMAXINFO*)lp;
-            if (self->min_w_ > 0 && self->min_h_ > 0) {
+            if (self && self->min_w_ > 0 && self->min_h_ > 0) {
                 mmi->ptMinTrackSize.x = self->min_w_;
                 mmi->ptMinTrackSize.y = self->min_h_;
             }
             return 0;
         }
         case WM_DESTROY:
-            self->done_ = true;
-            self->hwnd_ = nullptr;
+            if (self) {
+                self->done_ = true;
+                self->hwnd_ = nullptr;
+            }
             return 0;
         default:
             return DefWindowProcW(hwnd, msg, wp, lp);
