@@ -15,7 +15,7 @@ def hint_w(text, dpi):
 def make(dpi):
     W = S(640, dpi); 
     LABEL_W, EDIT_W, PAD = S(150, dpi), S(80, dpi), S(12, dpi)
-    PAGE_TOP = 26  # TCM_ADJUSTRECT 结果（100% 约 24-28）
+    PAGE_TOP = 36  # TCM_ADJUSTRECT(~24) + S(12) 间距
     c1, c1e = PAD + S(8, dpi), PAD + S(8, dpi) + LABEL_W + S(6, dpi)
     c2, c2e = S(340, dpi), S(340, dpi) + LABEL_W + S(6, dpi)
     def row(i): return PAGE_TOP + i * S(34, dpi)

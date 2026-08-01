@@ -383,12 +383,13 @@ void SettingsWindow::run() {
             SendMessageW(tab, TCM_INSERTITEM, i, (LPARAM)&ti);
         }
     }
-    // 内容区起点：TCM_ADJUSTRECT 计算 Tab 的实际显示区域（官方推荐做法）
+    // 内容区起点：TCM_ADJUSTRECT 计算 Tab 的实际显示区域（官方推荐做法），
+    // 并额外留出间距（tab 下边框线约在 tr.top 附近，首行控件必须避开）
     {
         RECT tr;
         GetClientRect(tab, &tr);
         SendMessageW(tab, TCM_ADJUSTRECT, FALSE, (LPARAM)&tr);
-        PAGE_TOP = tr.top + S(2);
+        PAGE_TOP = tr.top + S(12);
     }
 
     const int c1 = PAD() + S(8);                    // 列1 label X

@@ -468,6 +468,10 @@ bool App::run_wav_test(const std::string& wav_path) {
 void App::apply_config() {
     cfg_.save(cfg_.path());
 
+    // 共享窗口需销毁重建才能应用位置/样式改动
+    // （ensure_window 只做懒创建，窗口存在时不会重建 → 新配置不生效）
+    window_.destroy();
+
     // 重启两条管线（应用新配置）
     bool mic_on = mic_.enabled.load(), pc_on = pc_.enabled.load();
     if (mic_on) { stop_pipeline(mic_); start_pipeline(mic_, true); }
