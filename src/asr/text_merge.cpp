@@ -145,6 +145,21 @@ std::string TextMerger::update(const std::string& new_text, bool finalize, int64
 std::string TextMerger::current() const {
     // 每句一行：已定稿句子（上一句）与当前句分行显示——
     // "上一句固定在第一行，当前句在第二行实时更新"
+    //
+    // 去重合并规则：
+    //   - 当前句是上一句的【扩展】（以上一句开头，更完整）→ 只显示当前句一行，
+    //     避免两行开头相同（如"大家好。"+"大家好，我们开始"）
+    //   - 否则两行显示（上一句 + 当前句）
+    if (!current_.empty() && !sentences_.empty()) {
+        // 去标点比较前缀（标点差异不影响扩展判断）
+        const std::string last_p = strip_punct(sentences_.back().text);
+        const std::string cur_p  = strip_punct(current_);
+        if (cur_p.size() > last_p.size() &&
+            cur_p.compare(0, last_p.size(), last_p) == 0) {
+            return current_;
+        }
+    }
+
     std::string s;
     const size_t keep = std::min(sentences_.size(), (size_t)max_history_);
     for (size_t i = sentences_.size() - keep; i < sentences_.size(); i++) {

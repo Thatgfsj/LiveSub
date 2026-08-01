@@ -295,9 +295,22 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
 
     // 1. 字号自适应：仅对【超长的单句】（不含显式换行）逐级缩小字号，
     //    避免"第二行孤字"；多句短文本不缩字号（每行几个字保持原字号）
+    //    从上次字号开始尝试（平滑过渡，避免内容长短变化时字号跳变）
     const bool multi_line_text = text.find(L'\n') != std::wstring::npos;
     float size = style_.font_size;
     if (!multi_line_text) {
+        // 上次缩过字号且文本没变长太多 → 沿用上次字号
+        if (last_layout_size_ > 0.0f && last_layout_size_ < style_.font_size) {
+            DWRITE_TEXT_RANGE range = {0, (UINT32)text.size()};
+            l->SetFontSize(last_layout_size_, range);
+            UINT32 lines = 0;
+            l->GetLineMetrics(nullptr, 0, &lines);
+            if (lines <= max) {
+                size = last_layout_size_;
+            } else {
+                size = last_layout_size_; // 继续从上次字号往下缩
+            }
+        }
         for (int attempt = 0; attempt < 14; attempt++) {
             DWRITE_TEXT_RANGE range = {0, (UINT32)text.size()};
             l->SetFontSize(size, range);
@@ -306,6 +319,17 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
             if (lines <= max || size <= min_size) break;
             size *= 0.92f;
         }
+        // 文本明显变短（恢复原字号能放下）→ 回到原字号
+        if (last_layout_size_ > 0.0f && size == last_layout_size_) {
+            DWRITE_TEXT_RANGE range = {0, (UINT32)text.size()};
+            l->SetFontSize(style_.font_size, range);
+            UINT32 lines = 0;
+            l->GetLineMetrics(nullptr, 0, &lines);
+            if (lines <= max) {
+                size = style_.font_size;
+            }
+        }
+        last_layout_size_ = size;
     }
 
     // 2. 仍超行 → 滚动保留最后 max 行

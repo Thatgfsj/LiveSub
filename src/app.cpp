@@ -323,7 +323,9 @@ void App::asr_loop() {
         // finalize 时用固定段尾（on_speech_end 记录），避免新段开始后窗口漂移
         const size_t seg_start = seg_start_total_.load();
         const size_t seg_end = finalize ? seg_end_total_.load() : 0;
-        const size_t max_len = (size_t)asr_.sample_rate() * 8; // 最长 8s（模型动态窗口上限）
+        // 部分结果窗口最长 8s（模型动态窗口上限）；定稿窗口取段全量（上限 30s），
+        // 保证定稿内容与最后显示的部分结果一致，避免字幕跳变
+        const size_t max_len = (size_t)asr_.sample_rate() * (finalize ? 30 : 8);
         const size_t n = queue_->take_segment(seg_start, seg_end, max_len, win_buf_);
         if (n == 0) {
             last_asr_heartbeat_ms_ = t_now;

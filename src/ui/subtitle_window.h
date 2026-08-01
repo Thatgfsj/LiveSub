@@ -68,6 +68,7 @@ private:
 
     // 文本变化时重建布局（跨线程标记）
     std::atomic<bool> layout_dirty_{true};
+    float last_layout_size_ = 0.0f; // 上次布局字号（平滑用，避免缩放跳变）
     void rebuild_layout(const std::wstring& text, float w, float h);
 
     // 分层窗口资源
