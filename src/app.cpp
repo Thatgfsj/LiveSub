@@ -101,10 +101,12 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
     p.win_buf.reserve((size_t)asr_.sample_rate() * 32);
     p.merger.set_max_lines(cfg_.max_lines);
 
-    // 输出
+    // 输出（按设置：写文本文件 / 写 SRT）
     TextOutput::Config oc;
-    oc.write_text = false;
-    oc.write_srt  = false;
+    oc.write_text = cfg_.write_text;
+    oc.text_path  = cfg_.text_path;
+    oc.write_srt  = cfg_.write_srt;
+    oc.srt_path   = cfg_.srt_path;
     p.output.configure(oc);
 
     if (start_capture) {
@@ -373,8 +375,12 @@ bool App::process_pipeline(AsrPipeline& p) {
             // 单一展示框整窗显示：哪条管线在识别就显示谁的字幕
             // （不分割上下半区——两条字幕一般不会同时开）
             p.window->set_text(full, p.merger.confirmed_offset());
+            // 输出：interim 更新文本文件（OBS 轮询实时字幕），定稿句写入/追加
+            p.output.update(full, finalize ? r.text : std::string());
             if (finalize) {
                 p.window->set_status("");
+                // 讲话稿记录（托盘"开始记录"开启时）追加到桌面文件
+                p.output.append_record(r.text);
                 // 语音输入：只对麦克风轨定稿句输入
                 if (&p == &mic_ && voice_input_.enabled()) {
                     voice_input_.commit_text(r.text + " ");

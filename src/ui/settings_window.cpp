@@ -8,38 +8,34 @@
 #include "config.h"
 #include "audio/wasapi_capture.h"
 
-// 控件 ID
+// 控件 ID（按页分区，便于切换时批量显隐）
 enum {
-    IDC_DEVICE      = 1001,
-    IDC_REFRESH     = 1002,
-    IDC_VAD_THRESH  = 1003,
-    IDC_SILENCE     = 1004,
-    IDC_CHUNK       = 1005,
-    IDC_HOP         = 1006,
-    IDC_FONT_SIZE   = 1007,
-    IDC_FONT_COLOR  = 1008,
-    IDC_BG_COLOR    = 1009,
-    IDC_TOP         = 1010,
-    IDC_CLICK_THRU  = 1011,
-    IDC_WRITE_TEXT  = 1012,
-    IDC_WRITE_SRT   = 1013,
-    IDC_APPLY       = 1014,
-    IDC_CLOSE       = 1015,
-    IDC_MODEL_INFO  = 1016,
-    IDC_WIN_X       = 1017,
-    IDC_WIN_Y       = 1018,
-    IDC_BG_ALPHA    = 1019,
-    IDC_MAX_LINES   = 1020,
-    IDC_MODEL_BIG   = 1021,
-    IDC_MODEL_SMALL = 1022,
-    IDC_STROKE      = 1023,
-    IDC_STROKE_COLOR = 1024,
-    IDC_STROKE_W    = 1025,
-    IDC_MIC_TRACK   = 1026,
-    IDC_PC_TRACK    = 1027,
+    // Tab 控件
+    IDC_TAB = 1000,
+
+    // 页1 字幕显示
+    IDC_FONT_SIZE = 1101, IDC_FONT_COLOR, IDC_BG_COLOR, IDC_BG_ALPHA,
+    IDC_MAX_LINES, IDC_STROKE, IDC_STROKE_COLOR, IDC_STROKE_W,
+    IDC_WIN_X, IDC_WIN_Y, IDC_TOP, IDC_CLICK_THRU,
+
+    // 页2 识别
+    IDC_VAD_THRESH = 1201, IDC_SILENCE, IDC_CHUNK, IDC_HOP,
+    IDC_MODEL_BIG, IDC_MODEL_SMALL, IDC_MODEL_INFO,
+
+    // 页3 音频
+    IDC_DEVICE = 1301, IDC_REFRESH, IDC_MIC_TRACK, IDC_PC_TRACK,
+
+    // 页4 输出
+    IDC_WRITE_TEXT = 1401, IDC_WRITE_SRT,
+
+    // 底部按钮
+    IDC_APPLY = 1501, IDC_CLOSE,
 };
 
-static const int LABEL_W = 120, EDIT_W = 90, ROW_H = 30, PAD = 12;
+// 布局常量
+static const int LABEL_W = 150, EDIT_W = 80, PAD = 12;
+static const int PAGE_TOP = 40;    // 内容区起点 Y（Tab 下方）
+static const int BTN_Y = 412;      // 底部按钮 Y
 
 SettingsWindow::SettingsWindow(Config& cfg,
                                std::function<void()> on_apply,
@@ -51,14 +47,21 @@ SettingsWindow::~SettingsWindow() {
     if (hfont_) { DeleteObject(hfont_); hfont_ = nullptr; }
 }
 
-static void add_label(HWND parent, int id, const wchar_t* text, int x, int y) {
+// label（右对齐，宽度足够容纳中文长标签，避免文字被裁）
+static void add_label(HWND parent, const wchar_t* text, int x, int y) {
     CreateWindowW(L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_RIGHT,
                   x, y + 4, LABEL_W, 20, parent, nullptr, GetModuleHandleW(nullptr), nullptr);
 }
 
-static HWND add_edit(HWND parent, int id, const std::wstring& text, int x, int y) {
-    return CreateWindowW(L"EDIT", text.c_str(), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+static HWND add_edit(HWND parent, int id, int x, int y) {
+    return CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
                          x, y, EDIT_W, 22, parent, (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
+}
+
+// 说明文字（灰色小字）
+static void add_hint(HWND parent, const wchar_t* text, int x, int y) {
+    CreateWindowW(L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT,
+                  x, y + 4, 260, 18, parent, nullptr, GetModuleHandleW(nullptr), nullptr);
 }
 
 static std::wstring get_edit_text(HWND hwnd) {
@@ -67,7 +70,6 @@ static std::wstring get_edit_text(HWND hwnd) {
     GetWindowTextW(hwnd, s.data(), n + 1);
     return s;
 }
-
 
 void SettingsWindow::populate_devices() {
     HWND combo = GetDlgItem(hwnd_, IDC_DEVICE);
@@ -82,49 +84,56 @@ void SettingsWindow::populate_devices() {
 
 void SettingsWindow::fill_fields() {
     auto set_edit = [&](int id, const std::wstring& v) {
-        SetWindowTextW(GetDlgItem(hwnd_, id), v.c_str());
+        HWND c = GetDlgItem(hwnd_, id);
+        if (c) SetWindowTextW(c, v.c_str());
     };
-    set_edit(IDC_VAD_THRESH, std::to_wstring((int)cfg_.vad_threshold_db));
-    set_edit(IDC_SILENCE,    std::to_wstring(cfg_.silence_ms));
-    set_edit(IDC_CHUNK,      std::to_wstring(cfg_.chunk_ms));
-    set_edit(IDC_HOP,        std::to_wstring(cfg_.hop_ms));
-    set_edit(IDC_FONT_SIZE,  std::to_wstring((int)cfg_.font_size));
+    // 页1 字幕
+    set_edit(IDC_FONT_SIZE, std::to_wstring((int)cfg_.font_size));
     set_edit(IDC_FONT_COLOR, utf8_to_wide(cfg_.font_color));
-    set_edit(IDC_BG_COLOR,   utf8_to_wide(cfg_.bg_color));
-    set_edit(IDC_WIN_X,      std::to_wstring(cfg_.pos_x));
-    set_edit(IDC_WIN_Y,      std::to_wstring(cfg_.pos_y));
+    set_edit(IDC_BG_COLOR, utf8_to_wide(cfg_.bg_color));
     {
-        // 背景透明度：从 bg_color 的 alpha 通道换算为百分比显示
         const auto c = parse_color(cfg_.bg_color).value_or(0xC0000000u);
         const int pct = (int)(((c >> 24) & 0xFF) * 100 / 255);
         set_edit(IDC_BG_ALPHA, std::to_wstring(pct));
     }
     set_edit(IDC_MAX_LINES, std::to_wstring(cfg_.max_lines));
-    // 模型大小
+    set_edit(IDC_STROKE_COLOR, utf8_to_wide(cfg_.stroke_color));
+    set_edit(IDC_STROKE_W, std::to_wstring(cfg_.stroke_width));
+    set_edit(IDC_WIN_X, std::to_wstring(cfg_.pos_x));
+    set_edit(IDC_WIN_Y, std::to_wstring(cfg_.pos_y));
+    CheckDlgButton(hwnd_, IDC_STROKE, cfg_.stroke_enabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd_, IDC_TOP, cfg_.always_on_top ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd_, IDC_CLICK_THRU, cfg_.click_through ? BST_CHECKED : BST_UNCHECKED);
+
+    // 页2 识别
+    set_edit(IDC_VAD_THRESH, std::to_wstring((int)cfg_.vad_threshold_db));
+    set_edit(IDC_SILENCE, std::to_wstring(cfg_.silence_ms));
+    set_edit(IDC_CHUNK, std::to_wstring(cfg_.chunk_ms));
+    set_edit(IDC_HOP, std::to_wstring(cfg_.hop_ms));
     if (cfg_.model_size == "small") {
         CheckRadioButton(hwnd_, IDC_MODEL_BIG, IDC_MODEL_SMALL, IDC_MODEL_SMALL);
     } else {
         CheckRadioButton(hwnd_, IDC_MODEL_BIG, IDC_MODEL_SMALL, IDC_MODEL_BIG);
     }
-    // 描边
-    CheckDlgButton(hwnd_, IDC_STROKE, cfg_.stroke_enabled ? BST_CHECKED : BST_UNCHECKED);
-    set_edit(IDC_STROKE_COLOR, utf8_to_wide(cfg_.stroke_color));
-    set_edit(IDC_STROKE_W, std::to_wstring(cfg_.stroke_width));
-    // 双轨
-    CheckDlgButton(hwnd_, IDC_MIC_TRACK, cfg_.mic_enabled ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd_, IDC_PC_TRACK,  cfg_.pc_enabled  ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd_, IDC_TOP,        cfg_.always_on_top ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd_, IDC_CLICK_THRU, cfg_.click_through ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd_, IDC_WRITE_TEXT, cfg_.write_text ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd_, IDC_WRITE_SRT,  cfg_.write_srt ? BST_CHECKED : BST_UNCHECKED);
 
-    // 只显示文件名（完整路径太长会截断）
+    // 页3 音频
+    CheckDlgButton(hwnd_, IDC_MIC_TRACK, cfg_.mic_enabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd_, IDC_PC_TRACK, cfg_.pc_enabled ? BST_CHECKED : BST_UNCHECKED);
+
+    // 页4 输出
+    CheckDlgButton(hwnd_, IDC_WRITE_TEXT, cfg_.write_text ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd_, IDC_WRITE_SRT, cfg_.write_srt ? BST_CHECKED : BST_UNCHECKED);
+
+    // 模型信息（只显示文件名，完整路径太长会截断）
     auto basename = [](const std::string& p) {
-        const size_t pos = p.find_last_of("\/");
+        const size_t pos = p.find_last_of("\\/");
         return pos == std::string::npos ? p : p.substr(pos + 1);
     };
     std::wstring info = L"模型: " + utf8_to_wide(basename(cfg_.model_path)) +
                         L"\n音频编码器: " + utf8_to_wide(basename(cfg_.mmproj_path));
+    HWND mi = GetDlgItem(hwnd_, IDC_MODEL_INFO);
+    if (mi) SetWindowTextW(mi, info.c_str());
+
     populate_devices();
 }
 
@@ -141,17 +150,13 @@ void SettingsWindow::read_fields() {
         return out;
     };
 
-    cfg_.vad_threshold_db  = (float)edit_int(IDC_VAD_THRESH, (int)cfg_.vad_threshold_db);
-    cfg_.silence_ms        = edit_int(IDC_SILENCE, cfg_.silence_ms);
-    cfg_.chunk_ms          = std::max(500, edit_int(IDC_CHUNK, cfg_.chunk_ms));
-    cfg_.hop_ms            = std::max(200, std::min(cfg_.chunk_ms, edit_int(IDC_HOP, cfg_.hop_ms)));
+    // 页1 字幕
     cfg_.font_size         = (float)std::max(12, edit_int(IDC_FONT_SIZE, (int)cfg_.font_size));
     cfg_.font_color        = edit_str(IDC_FONT_COLOR);
     cfg_.bg_color          = edit_str(IDC_BG_COLOR);
     cfg_.pos_x             = std::max(0, std::min(GetSystemMetrics(SM_CXSCREEN), edit_int(IDC_WIN_X, cfg_.pos_x)));
     cfg_.pos_y             = std::max(0, std::min(GetSystemMetrics(SM_CYSCREEN), edit_int(IDC_WIN_Y, cfg_.pos_y)));
     {
-        // 背景透明度：0-100% 写回 bg_color 的 alpha（保留原 RGB）
         int pct = edit_int(IDC_BG_ALPHA, 75);
         pct = std::max(0, std::min(100, pct));
         auto c = parse_color(cfg_.bg_color).value_or(0xC0000000u);
@@ -160,29 +165,84 @@ void SettingsWindow::read_fields() {
         cfg_.bg_color = buf;
     }
     cfg_.max_lines = std::max(1, std::min(6, edit_int(IDC_MAX_LINES, cfg_.max_lines)));
-    // 模型大小
+    cfg_.stroke_enabled = IsDlgButtonChecked(hwnd_, IDC_STROKE) == BST_CHECKED;
+    cfg_.stroke_color   = edit_str(IDC_STROKE_COLOR);
+    cfg_.stroke_width   = std::max(0, std::min(8, edit_int(IDC_STROKE_W, cfg_.stroke_width)));
+    cfg_.always_on_top     = IsDlgButtonChecked(hwnd_, IDC_TOP) == BST_CHECKED;
+    cfg_.click_through     = IsDlgButtonChecked(hwnd_, IDC_CLICK_THRU) == BST_CHECKED;
+
+    // 页2 识别
+    cfg_.vad_threshold_db  = (float)edit_int(IDC_VAD_THRESH, (int)cfg_.vad_threshold_db);
+    cfg_.silence_ms        = edit_int(IDC_SILENCE, cfg_.silence_ms);
+    cfg_.chunk_ms          = std::max(500, edit_int(IDC_CHUNK, cfg_.chunk_ms));
+    cfg_.hop_ms            = std::max(200, std::min(cfg_.chunk_ms, edit_int(IDC_HOP, cfg_.hop_ms)));
     if (IsDlgButtonChecked(hwnd_, IDC_MODEL_SMALL) == BST_CHECKED) {
         cfg_.model_size = "small";
     } else {
         cfg_.model_size = "large";
     }
-    // 描边
-    cfg_.stroke_enabled = IsDlgButtonChecked(hwnd_, IDC_STROKE) == BST_CHECKED;
-    cfg_.stroke_color   = edit_str(IDC_STROKE_COLOR);
-    cfg_.stroke_width   = std::max(0, std::min(8, edit_int(IDC_STROKE_W, cfg_.stroke_width)));
-    // 双轨
+
+    // 页3 音频
     cfg_.mic_enabled = IsDlgButtonChecked(hwnd_, IDC_MIC_TRACK) == BST_CHECKED;
     cfg_.pc_enabled  = IsDlgButtonChecked(hwnd_, IDC_PC_TRACK) == BST_CHECKED;
-    cfg_.always_on_top     = IsDlgButtonChecked(hwnd_, IDC_TOP) == BST_CHECKED;
-    cfg_.click_through     = IsDlgButtonChecked(hwnd_, IDC_CLICK_THRU) == BST_CHECKED;
-    cfg_.write_text        = IsDlgButtonChecked(hwnd_, IDC_WRITE_TEXT) == BST_CHECKED;
-    cfg_.write_srt         = IsDlgButtonChecked(hwnd_, IDC_WRITE_SRT) == BST_CHECKED;
+
+    // 页4 输出
+    cfg_.write_text = IsDlgButtonChecked(hwnd_, IDC_WRITE_TEXT) == BST_CHECKED;
+    cfg_.write_srt  = IsDlgButtonChecked(hwnd_, IDC_WRITE_SRT) == BST_CHECKED;
 }
 
 void SettingsWindow::apply() {
     read_fields();
     cfg_.save(cfg_.path());
     if (on_apply_) on_apply_();
+}
+
+// 切换 Tab 页：只显示当前页的控件
+void SettingsWindow::show_page(int page) {
+    const int pages[4][2] = {
+        {IDC_FONT_SIZE, IDC_CLICK_THRU},
+        {IDC_VAD_THRESH, IDC_MODEL_INFO},
+        {IDC_DEVICE, IDC_PC_TRACK},
+        {IDC_WRITE_TEXT, IDC_WRITE_SRT},
+    };
+    for (int i = 0; i < 4; i++) {
+        const bool vis = (i == page);
+        for (int id = pages[i][0]; id <= pages[i][1]; id++) {
+            HWND c = GetDlgItem(hwnd_, id);
+            if (c) ShowWindow(c, vis ? SW_SHOW : SW_HIDE);
+        }
+    }
+}
+
+// 记录所有子控件在客户区中的初始位置（缩放基准）
+void SettingsWindow::snapshot_layout() {
+    layout_.clear();
+    RECT cr;
+    GetClientRect(hwnd_, &cr);
+    base_w_ = cr.right;
+    base_h_ = cr.bottom;
+    EnumChildWindows(hwnd_, [](HWND c, LPARAM lp) -> BOOL {
+        auto* v = (std::vector<std::pair<HWND, RECT>>*)lp;
+        RECT r;
+        GetWindowRect(c, &r);
+        MapWindowPoints(nullptr, GetParent(c), (LPPOINT)&r, 2); // 转客户区坐标
+        v->emplace_back(c, r);
+        return TRUE;
+    }, (LPARAM)&layout_);
+}
+
+// 窗口尺寸变化：子控件按 (新尺寸/初始尺寸) 等比缩放定位
+void SettingsWindow::resize_children(int w, int h) {
+    if (layout_.empty() || base_w_ <= 0 || base_h_ <= 0) return;
+    const float sx = (float)w / base_w_;
+    const float sy = (float)h / base_h_;
+    for (auto& [c, r] : layout_) {
+        SetWindowPos(c, nullptr,
+                     (int)(r.left * sx), (int)(r.top * sy),
+                     std::max(30, (int)((r.right - r.left) * sx)),
+                     std::max(16, (int)((r.bottom - r.top) * sy)),
+                     SWP_NOZORDER);
+    }
 }
 
 LRESULT CALLBACK SettingsWindow::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -212,9 +272,28 @@ LRESULT CALLBACK SettingsWindow::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
             }
             return 0;
         }
+        case WM_NOTIFY: {
+            NMHDR* h = (NMHDR*)lp;
+            if (h && h->code == TCN_SELCHANGE && h->idFrom == IDC_TAB) {
+                const int sel = (int)SendMessageW(h->hwndFrom, TCM_GETCURSEL, 0, 0);
+                if (self) self->show_page(sel);
+            }
+            return 0;
+        }
         case WM_CLOSE:
             DestroyWindow(hwnd);
             return 0;
+        case WM_SIZE: {
+            // 缩放：子控件按比例跟随
+            if (self) self->resize_children(LOWORD(lp), HIWORD(lp));
+            return 0;
+        }
+        case WM_GETMINMAXINFO: {
+            MINMAXINFO* mmi = (MINMAXINFO*)lp;
+            mmi->ptMinTrackSize.x = 500;
+            mmi->ptMinTrackSize.y = 460;
+            return 0;
+        }
         case WM_DESTROY:
             self->done_ = true;
             self->hwnd_ = nullptr;
@@ -235,110 +314,126 @@ void SettingsWindow::run() {
     wc.lpszClassName = cls;
     RegisterClassExW(&wc);
 
-    const int W = LABEL_W + EDIT_W + PAD * 3 + 330; // 560：容纳说明文字与刷新按钮
-    const int H = 17 * ROW_H + 90;
-    hwnd_ = CreateWindowExW(0, cls, L"LiveSub 设置", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
-                            CW_USEDEFAULT, CW_USEDEFAULT, W, H,
+    const int W = 640;
+    const int H = BTN_Y + 40; // 内容 + 底部按钮 + 边距
+    const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU |
+                        WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX;
+    RECT wrc = {0, 0, W, H};
+    AdjustWindowRectEx(&wrc, style, FALSE, 0);
+    hwnd_ = CreateWindowExW(0, cls, L"LiveSub 设置", style,
+                            CW_USEDEFAULT, CW_USEDEFAULT,
+                            wrc.right - wrc.left, wrc.bottom - wrc.top,
                             nullptr, nullptr, hinst, this);
     if (!hwnd_) return;
 
-    // 控件创建
     HWND h = hwnd_;
-    int y = PAD;
-    auto row = [&]() { return y; };
-    auto next = [&]() { int r = y; y += ROW_H; return r; };
 
-    add_label(h, 0, L"麦克风", PAD, next());
+    // ---- Tab 控件（4 页） ----
+    HWND tab = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                             PAD, 8, W - PAD * 2, 26, h, (HMENU)(INT_PTR)IDC_TAB, hinst, nullptr);
+    {
+        TCITEMW ti = {};
+        ti.mask = TCIF_TEXT;
+        const wchar_t* names[] = {L"字幕显示", L"识别", L"音频", L"输出"};
+        for (int i = 0; i < 4; i++) {
+            ti.pszText = (LPWSTR)names[i];
+            SendMessageW(tab, TCM_INSERTITEM, i, (LPARAM)&ti);
+        }
+    }
+
+    const int c1 = PAD + 8;                    // 列1 label X
+    const int c1e = c1 + LABEL_W + 6;          // 列1 edit X
+    const int c2 = 340;                        // 列2 label X
+    const int c2e = c2 + LABEL_W + 6;          // 列2 edit X
+    auto row1 = [&](int i) { return PAGE_TOP + i * 34; };
+
+    // ================= 页1 字幕显示（两列） =================
+    add_label(h, L"字号", c1, row1(0));
+    add_edit(h, IDC_FONT_SIZE, c1e, row1(0));
+    add_label(h, L"文字颜色", c1, row1(1));
+    add_edit(h, IDC_FONT_COLOR, c1e, row1(1));
+    add_hint(h, L"#RRGGBB（默认白）", c1e + EDIT_W + 8, row1(1));
+    add_label(h, L"背景颜色", c1, row1(2));
+    add_edit(h, IDC_BG_COLOR, c1e, row1(2));
+    add_label(h, L"背景透明度%", c1, row1(3));
+    add_edit(h, IDC_BG_ALPHA, c1e, row1(3));
+    add_hint(h, L"0=全透明 100=不透明（默认20）", c1e + EDIT_W + 8, row1(3));
+    add_label(h, L"字幕行数", c1, row1(4));
+    add_edit(h, IDC_MAX_LINES, c1e, row1(4));
+    add_hint(h, L"1-6（默认2：上一句+当前句）", c1e + EDIT_W + 8, row1(4));
+    CreateWindowW(L"BUTTON", L"文字描边", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                  c1, row1(5), 96, 22, h, (HMENU)(INT_PTR)IDC_STROKE, hinst, nullptr);
+    add_edit(h, IDC_STROKE_COLOR, c1e, row1(5));
+    add_hint(h, L"描边色 #RRGGBB", c1e + EDIT_W + 8, row1(5));
+    add_label(h, L"描边粗", c1, row1(6));
+    add_edit(h, IDC_STROKE_W, c1e, row1(6));
+    add_hint(h, L"1-8 像素", c1e + EDIT_W + 8, row1(6));
+
+    add_label(h, L"位置X(中心)", c2, row1(0));
+    add_edit(h, IDC_WIN_X, c2e, row1(0));
+    add_label(h, L"位置Y(中心)", c2, row1(1));
+    add_edit(h, IDC_WIN_Y, c2e, row1(1));
+    add_hint(h, L"像素坐标；X=960 居中，Y=900 贴近底部", c2e + EDIT_W + 8, row1(1));
+    CreateWindowW(L"BUTTON", L"置顶", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                  c2, row1(2), 100, 22, h, (HMENU)(INT_PTR)IDC_TOP, hinst, nullptr);
+    CreateWindowW(L"BUTTON", L"点击穿透", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                  c2 + 110, row1(2), 110, 22, h, (HMENU)(INT_PTR)IDC_CLICK_THRU, hinst, nullptr);
+    add_hint(h, L"穿透后鼠标可正常操作直播软件", c2e + EDIT_W + 8, row1(3));
+
+    // ================= 页2 识别（单列） =================
+    add_label(h, L"VAD 阈值(dB)", c1, row1(0));
+    add_edit(h, IDC_VAD_THRESH, c1e, row1(0));
+    add_hint(h, L"说话触发门限（默认-52），越接近0越难触发", c1e + EDIT_W + 8, row1(0));
+    add_label(h, L"句末静音(ms)", c1, row1(1));
+    add_edit(h, IDC_SILENCE, c1e, row1(1));
+    add_label(h, L"识别窗口(ms)", c1, row1(2));
+    add_edit(h, IDC_CHUNK, c1e, row1(2));
+    add_label(h, L"窗口步长(ms)", c1, row1(3));
+    add_edit(h, IDC_HOP, c1e, row1(3));
+    add_label(h, L"模型", c1, row1(4));
+    CreateWindowW(L"BUTTON", L"大模型 1.7B（更准）", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+                  c1e, row1(4), 150, 22, h, (HMENU)(INT_PTR)IDC_MODEL_BIG, hinst, nullptr);
+    CreateWindowW(L"BUTTON", L"小模型 0.6B（更快）", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+                  c1e + 160, row1(4), 150, 22, h, (HMENU)(INT_PTR)IDC_MODEL_SMALL, hinst, nullptr);
+    add_hint(h, L"大≈2.8GB / 小≈1.1GB，保存后重启生效", c1e + EDIT_W + 8, row1(5));
+    CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
+                  c1, row1(6), W - PAD * 2 - c1, 44, h, (HMENU)(INT_PTR)IDC_MODEL_INFO, hinst, nullptr);
+
+    // ================= 页3 音频（单列） =================
+    add_label(h, L"麦克风", c1, row1(0));
     CreateWindowW(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
-                  LABEL_W + PAD, y - ROW_H + 2, EDIT_W + 150, 200, h,
+                  c1e, row1(0), EDIT_W + 200, 200, h,
                   (HMENU)(INT_PTR)IDC_DEVICE, hinst, nullptr);
     CreateWindowW(L"BUTTON", L"刷新", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                  LABEL_W + EDIT_W + 170, y - ROW_H + 1, 60, 22, h,
+                  c1e + EDIT_W + 210, row1(0), 56, 22, h,
                   (HMENU)(INT_PTR)IDC_REFRESH, hinst, nullptr);
-
-    add_label(h, 0, L"VAD 阈值(dB)", PAD, next());
-    add_edit(h, IDC_VAD_THRESH, L"", LABEL_W + PAD, y - ROW_H + 1);
-    add_label(h, 0, L"句末静音(ms)", PAD, next());
-    add_edit(h, IDC_SILENCE, L"", LABEL_W + PAD, y - ROW_H + 1);
-    add_label(h, 0, L"窗口(ms)", PAD, next());
-    add_edit(h, IDC_CHUNK, L"", LABEL_W + PAD, y - ROW_H + 1);
-    add_label(h, 0, L"步长(ms)", PAD, next());
-    add_edit(h, IDC_HOP, L"", LABEL_W + PAD, y - ROW_H + 1);
-    add_label(h, 0, L"字号", PAD, next());
-    add_edit(h, IDC_FONT_SIZE, L"", LABEL_W + PAD, y - ROW_H + 1);
-    add_label(h, 0, L"文字颜色", PAD, next());
-    add_edit(h, IDC_FONT_COLOR, L"", LABEL_W + PAD, y - ROW_H + 1);
-    add_label(h, 0, L"背景颜色", PAD, next());
-    add_edit(h, IDC_BG_COLOR, L"", LABEL_W + PAD, y - ROW_H + 1);
-    add_label(h, 0, L"背景透明度%", PAD, next());
-    add_edit(h, IDC_BG_ALPHA, L"", LABEL_W + PAD, y - ROW_H + 1);
-    CreateWindowW(L"STATIC", L"0=全透明 100=不透明（默认20）", WS_CHILD | WS_VISIBLE | SS_LEFT,
-                  LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 300, 18, h,
-                  nullptr, GetModuleHandleW(nullptr), nullptr);
-    add_label(h, 0, L"字幕行数", PAD, next());
-    add_edit(h, IDC_MAX_LINES, L"", LABEL_W + PAD, y - ROW_H + 1);
-    CreateWindowW(L"STATIC", L"1-6（默认2：上一句+当前句）", WS_CHILD | WS_VISIBLE | SS_LEFT,
-                  LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 300, 18, h,
-                  nullptr, GetModuleHandleW(nullptr), nullptr);
-
-    // 模型管理
-    add_label(h, 0, L"模型", PAD, next());
-    CreateWindowW(L"BUTTON", L"大模型 1.7B（更准）", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-                  LABEL_W + PAD, y - ROW_H + 2, 170, 22, h,
-                  (HMENU)(INT_PTR)IDC_MODEL_BIG, hinst, nullptr);
-    CreateWindowW(L"BUTTON", L"小模型 0.6B（更快）", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-                  LABEL_W + PAD + 180, y - ROW_H + 2, 170, 22, h,
-                  (HMENU)(INT_PTR)IDC_MODEL_SMALL, hinst, nullptr);
-    CreateWindowW(L"STATIC", L"大=更准确/要求高（2.8GB）；小=更快/要求低（1.1GB）；保存后重启生效",
-                  WS_CHILD | WS_VISIBLE | SS_LEFT,
-                  LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 330, 18, h,
-                  nullptr, GetModuleHandleW(nullptr), nullptr);
-
-    // 描边
-    CreateWindowW(L"BUTTON", L"文字描边", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                  PAD, next(), 100, 22, h, (HMENU)(INT_PTR)IDC_STROKE, hinst, nullptr);
-    add_label(h, 0, L"描边色", PAD, next());
-    add_edit(h, IDC_STROKE_COLOR, L"", LABEL_W + PAD, y - ROW_H + 1);
-    add_label(h, 0, L"描边粗", PAD, next());
-    add_edit(h, IDC_STROKE_W, L"", LABEL_W + PAD, y - ROW_H + 1);
-    CreateWindowW(L"STATIC", L"颜色 #RRGGBB（默认黑）；粗细 1-8 像素", WS_CHILD | WS_VISIBLE | SS_LEFT,
-                  LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 300, 18, h,
-                  nullptr, GetModuleHandleW(nullptr), nullptr);
-
-    // 双轨
     CreateWindowW(L"BUTTON", L"麦克风字幕", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                  PAD, next(), 120, 22, h, (HMENU)(INT_PTR)IDC_MIC_TRACK, hinst, nullptr);
+                  c1, row1(2), 120, 22, h, (HMENU)(INT_PTR)IDC_MIC_TRACK, hinst, nullptr);
     CreateWindowW(L"BUTTON", L"电脑字幕", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                  PAD + 130, y - ROW_H + 2, 120, 22, h,
-                  (HMENU)(INT_PTR)IDC_PC_TRACK, hinst, nullptr);
-    CreateWindowW(L"STATIC", L"（也可在托盘右键快速切换）", WS_CHILD | WS_VISIBLE | SS_LEFT,
-                  PAD + 260, y - ROW_H + 4, 220, 18, h,
-                  nullptr, GetModuleHandleW(nullptr), nullptr);
-    add_label(h, 0, L"位置X", PAD, next());
-    add_edit(h, IDC_WIN_X, L"", LABEL_W + PAD, y - ROW_H + 1);
-    CreateWindowW(L"STATIC", L"字幕中心点像素坐标；X=960 居中，Y=900 贴近底部（默认 960, 900）",
-                  WS_CHILD | WS_VISIBLE | SS_LEFT,
-                  LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 340, 18, h,
-                  nullptr, GetModuleHandleW(nullptr), nullptr);
-    add_edit(h, IDC_WIN_Y, L"", LABEL_W + EDIT_W + PAD + 130, y - ROW_H + 1);
+                  c1 + 130, row1(2), 110, 22, h, (HMENU)(INT_PTR)IDC_PC_TRACK, hinst, nullptr);
+    add_hint(h, L"电脑字幕=识别电脑播放的声音（视频/直播）", c1 + 250, row1(2));
+    add_hint(h, L"两条字幕共用同一展示框，一般不同时开启；也可在托盘右键快速切换",
+             c1, row1(3));
 
-    CreateWindowW(L"BUTTON", L"置顶", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                  PAD, next(), 100, 22, h, (HMENU)(INT_PTR)IDC_TOP, hinst, nullptr);
-    CreateWindowW(L"BUTTON", L"点击穿透", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                  PAD + 110, y - ROW_H + 2, 120, 22, h, (HMENU)(INT_PTR)IDC_CLICK_THRU, hinst, nullptr);
+    // ================= 页4 输出（单列） =================
     CreateWindowW(L"BUTTON", L"写文本文件", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                  PAD, next(), 120, 22, h, (HMENU)(INT_PTR)IDC_WRITE_TEXT, hinst, nullptr);
-    CreateWindowW(L"BUTTON", L"写 SRT", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                  PAD + 130, y - ROW_H + 2, 100, 22, h, (HMENU)(INT_PTR)IDC_WRITE_SRT, hinst, nullptr);
+                  c1, row1(0), 120, 22, h, (HMENU)(INT_PTR)IDC_WRITE_TEXT, hinst, nullptr);
+    add_hint(h, L"每次定稿句追加到 subtitles.txt", c1 + 130, row1(0));
+    CreateWindowW(L"BUTTON", L"写 SRT 字幕", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                  c1, row1(1), 120, 22, h, (HMENU)(INT_PTR)IDC_WRITE_SRT, hinst, nullptr);
+    add_hint(h, L"带时间轴的 subtitles.srt", c1 + 130, row1(1));
+    add_hint(h, L"讲话稿记录（按时间命名存到桌面）在托盘菜单开启", c1, row1(3));
 
-    CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
-                  PAD, next(), W - PAD * 3, 44, h, (HMENU)(INT_PTR)IDC_MODEL_INFO, hinst, nullptr);
+    // ---- 底部按钮 ----
     CreateWindowW(L"BUTTON", L"应用并保存", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                  PAD, y + 4, 120, 26, h, (HMENU)(INT_PTR)IDC_APPLY, hinst, nullptr);
+                  PAD, BTN_Y, 120, 26, h, (HMENU)(INT_PTR)IDC_APPLY, hinst, nullptr);
     CreateWindowW(L"BUTTON", L"关闭", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                  PAD + 130, y + 4, 80, 26, h, (HMENU)(INT_PTR)IDC_CLOSE, hinst, nullptr);
+                  PAD + 130, BTN_Y, 80, 26, h, (HMENU)(INT_PTR)IDC_CLOSE, hinst, nullptr);
 
     fill_fields();
+
+    // 记录初始布局（缩放基准）
+    snapshot_layout();
 
     // 设置窗整体使用仿宋字体
     hfont_ = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
@@ -350,6 +445,9 @@ void SettingsWindow::run() {
             return TRUE;
         }, (LPARAM)hfont_);
     }
+
+    // 初始显示第 1 页（其余隐藏）
+    show_page(0);
 
     ShowWindow(hwnd_, SW_SHOW);
 
