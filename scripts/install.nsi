@@ -10,8 +10,10 @@ RequestExecutionLevel user
 
 ; 界面
 !include "MUI2.nsh"
+!include "nsDialogs.nsh"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
+Page custom PageTasks PageTasksLeave
 !insertmacro MUI_PAGE_INSTFILES
 ; 完成页：勾选运行 model-dl.exe 下载模型
 !define MUI_FINISHPAGE_RUN "$INSTDIR\model-dl.exe"
@@ -19,6 +21,28 @@ RequestExecutionLevel user
 !define MUI_FINISHPAGE_RUN_CHECKED
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_LANGUAGE "SimpChinese"
+
+; 附加任务页（桌面快捷方式勾选）
+Var CreateDesktopLnk
+Function PageTasks
+    nsDialogs::Create 1018
+    Pop $0
+    ${If} $0 == error
+        Abort
+    ${EndIf}
+    ${NSD_CreateLabel} 0 0 100% 24 "请选择附加任务："
+    ${NSD_CreateCheckbox} 0 30 100% 20 "创建桌面快捷方式"
+    Pop $CreateDesktopLnk
+    ${NSD_Check} $CreateDesktopLnk
+    nsDialogs::Show
+FunctionEnd
+
+Function PageTasksLeave
+    ${NSD_GetState} $CreateDesktopLnk $0
+    ${If} $0 == ${BST_CHECKED}
+        CreateShortcut "$DESKTOP\LiveSub 直播字幕.lnk" "$INSTDIR\livesub.exe"
+    ${EndIf}
+FunctionEnd
 
 Section "安装"
     SetOutPath "$INSTDIR"
@@ -56,19 +80,18 @@ Section "安装"
     ; 模型目录（下载器会填充）
     CreateDirectory "$INSTDIR\model"
 
-    ; 快捷方式
+    ; 开始菜单快捷方式
     CreateDirectory "$SMPROGRAMS\LiveSub"
     CreateShortcut "$SMPROGRAMS\LiveSub\LiveSub 直播字幕.lnk" "$INSTDIR\livesub.exe"
     CreateShortcut "$SMPROGRAMS\LiveSub\模型下载器.lnk" "$INSTDIR\model-dl.exe"
     CreateShortcut "$SMPROGRAMS\LiveSub\卸载 LiveSub.lnk" "$INSTDIR\uninstall.exe"
-    CreateShortcut "$DESKTOP\LiveSub 直播字幕.lnk" "$INSTDIR\livesub.exe"
 
     ; 卸载信息
     WriteUninstaller "$INSTDIR\uninstall.exe"
     WriteRegStr HKCU "Software\LiveSub" "InstallDir" "$INSTDIR"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiveSub" "DisplayName" "LiveSub 直播实时字幕"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiveSub" "UninstallString" "$INSTDIR\uninstall.exe"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiveSub" "DisplayVersion" "0.2.0"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiveSub" "DisplayVersion" "0.2.1"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiveSub" "Publisher" "Thatgfsj"
 SectionEnd
 
