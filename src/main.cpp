@@ -73,6 +73,34 @@ int main() {
         fclose(f);
     }
 
+    // 模型检测：缺失/不完整 → 提示启动下载器
+    {
+        const std::string mp = resolve_path("model");
+        const std::string main_f = mp + "\Qwen3-ASR-1.7B-Q8_0.gguf";
+        const std::string sml_f  = mp + "\Qwen3-ASR-0.6B-Q8_0.gguf";
+        const std::string proj_f = mp + "\mmproj-Qwen3-ASR-1.7B-bf16.gguf";
+        bool has_model = false;
+        FILE* f = fopen(main_f.c_str(), "rb");
+        if (f) { fseek(f, 0, SEEK_END); has_model = ftell(f) > 1000000000; fclose(f); }
+        if (!has_model) {
+            f = fopen(sml_f.c_str(), "rb");
+            if (f) { fseek(f, 0, SEEK_END); has_model = ftell(f) > 500000000; fclose(f); }
+        }
+        (void)proj_f;
+        if (!has_model && wav_test.empty()) {
+            const int ret = MessageBoxW(nullptr,
+                L"未检测到模型文件（model 目录）。\n\n"
+                L"大模型（1.7B）：更准确，约 2.8GB\n"
+                L"小模型（0.6B）：更快，约 1.1GB\n\n"
+                L"是否现在启动模型下载器？",
+                L"LiveSub", MB_YESNO | MB_ICONQUESTION);
+            if (ret == IDYES) {
+                ShellExecuteW(nullptr, L"open", L"model-dl.exe", nullptr, nullptr, SW_SHOWNORMAL);
+            }
+            return 0;
+        }
+    }
+
     App app;
     if (!app.init(config_path, wav_test.empty())) {
         fatal("LiveSub 启动失败\n\n请查看 livesub.log（程序目录下）了解详情。");

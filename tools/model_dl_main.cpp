@@ -64,10 +64,19 @@ static void download_worker(const std::string& model_dir, const ModelChoice& mc,
             rc = download_file(files[i],
                 [](uint64_t done, uint64_t total) -> bool {
                     if (g_cancel) return false;
+                    // 进度节流：每 256KB 更新一次
+                    static uint64_t last = 0;
+                    if (done - last < 256 * 1024) return true;
+                    last = done;
                     if (total > 0) {
                         SendMessageW(g_progress, PBM_SETPOS, (WPARAM)(done * 100 / total), 0);
                         wchar_t buf[128];
                         swprintf(buf, 128, L"%.0f / %.0f MB", done / 1048576.0, total / 1048576.0);
+                        SetWindowTextW(g_status, buf);
+                    } else {
+                        // 服务端未给总长度：显示已下载量
+                        wchar_t buf[128];
+                        swprintf(buf, 128, L"已下载 %.0f MB ...", done / 1048576.0);
                         SetWindowTextW(g_status, buf);
                     }
                     return true;
@@ -84,19 +93,41 @@ static void download_worker(const std::string& model_dir, const ModelChoice& mc,
     if (all_ok) SetFocus(g_done);
 }
 
-int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
+// 解析 model 目录（exe 所在目录 + model）
+static std::string get_model_dir() {
     std::string model_dir;
+    wchar_t buf[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    std::wstring w(buf);
+    size_t pos = w.find_last_of(L"\\/");
+    if (pos != std::wstring::npos) w.resize(pos);
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    model_dir.assign((size_t)n - 1, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, model_dir.data(), n, nullptr, nullptr);
+    model_dir += "\\model";
+    return model_dir;
+}
+
+static void begin_download(HWND hwnd) {
+    EnableWindow(GetDlgItem(hwnd, 1), FALSE);
+    EnableWindow(GetDlgItem(hwnd, 2), FALSE);
+    EnableWindow(GetDlgItem(hwnd, 3), FALSE);
+    g_use_large = (SendMessageW(GetDlgItem(hwnd, 2), BM_GETCHECK, 0, 0) == BST_CHECKED);
+    const ModelChoice& mc = g_use_large ? kLarge : kSmall;
+    const std::string repo = g_use_large ? kRepo : kRepoSm;
+    std::thread(download_worker, get_model_dir(), mc, repo).detach();
+}
+
+int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR lpCmdLine, int) {
+    // 命令行：--auto [large|small] 直接开始下载（跳过选择界面）
+    bool auto_start = false;
     {
-        wchar_t buf[MAX_PATH] = {};
-        GetModuleFileNameW(nullptr, buf, MAX_PATH);
-        std::wstring w(buf);
-        size_t pos = w.find_last_of(L"\\/");
-        if (pos != std::wstring::npos) w.resize(pos);
-        int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
-        model_dir.assign((size_t)n - 1, '\0');
-        WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, model_dir.data(), n, nullptr, nullptr);
-        model_dir += "\\model";
+        std::wstring cmd = lpCmdLine ? lpCmdLine : L"";
+        if (cmd.find(L"--auto") != std::wstring::npos) auto_start = true;
+        if (cmd.find(L"--small") != std::wstring::npos) g_use_large = false;
+        if (cmd.find(L"--large") != std::wstring::npos) g_use_large = true;
     }
+    const std::string model_dir = get_model_dir();
     CreateDirectoryA(model_dir.c_str(), nullptr);
 
     // 窗口：选择模型大小 + 进度
@@ -108,25 +139,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
         if (m == WM_COMMAND) {
             const int id = LOWORD(wp);
             if (id == 1) { // 开始下载
-                EnableWindow(GetDlgItem(h, 1), FALSE);
-                EnableWindow(GetDlgItem(h, 2), FALSE);
-                EnableWindow(GetDlgItem(h, 3), FALSE);
-                g_use_large = (SendMessageW(GetDlgItem(h, 2), BM_GETCHECK, 0, 0) == BST_CHECKED);
-                std::string dir;
-                {
-                    wchar_t buf[MAX_PATH] = {};
-                    GetModuleFileNameW(nullptr, buf, MAX_PATH);
-                    std::wstring w(buf);
-                    size_t p = w.find_last_of(L"\\/");
-                    w.resize(p);
-                    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
-                    dir.assign((size_t)n - 1, '\0');
-                    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, dir.data(), n, nullptr, nullptr);
-                    dir += "\\model";
-                }
-                const ModelChoice& mc = g_use_large ? kLarge : kSmall;
-                const std::string repo = g_use_large ? kRepo : kRepoSm;
-                std::thread(download_worker, dir, mc, repo).detach();
+                begin_download(h);
                 return 0;
             }
             if (id == 4) { PostQuitMessage(0); return 0; }
@@ -162,6 +175,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
     g_done = CreateWindowExW(0, L"BUTTON", L"关闭", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                              420, 152, 70, 26, hwnd, (HMENU)4, hInst, nullptr);
     ShowWindow(hwnd, SW_SHOW);
+    if (auto_start) {
+        begin_download(hwnd);
+    }
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
