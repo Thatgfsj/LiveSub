@@ -17,7 +17,7 @@ Page custom PageTasks PageTasksLeave
 !insertmacro MUI_PAGE_INSTFILES
 ; 完成页：勾选运行 model-dl.exe 下载模型
 !define MUI_FINISHPAGE_RUN "$INSTDIR\model-dl.exe"
-!define MUI_FINISHPAGE_RUN_TEXT "启动模型下载器（大模型 1.7B 约 2.8GB / 小模型 0.6B 约 1.1GB，首次使用需要）"
+!define MUI_FINISHPAGE_RUN_TEXT "启动模型下载器（首次使用需要）"
 !define MUI_FINISHPAGE_RUN_CHECKED
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_LANGUAGE "SimpChinese"

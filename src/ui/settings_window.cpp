@@ -417,7 +417,7 @@ void SettingsWindow::run() {
     add_edit(h, IDC_FONT_COLOR, c1e, row1(1));
     add_label(h, L"背景颜色", c1, row1(2));
     add_edit(h, IDC_BG_COLOR, c1e, row1(2));
-    add_label(h, L"透明度%(0-100)", c1, row1(3));
+    add_label(h, L"背景透明度", c1, row1(3));
     add_edit(h, IDC_BG_ALPHA, c1e, row1(3));
     add_label(h, L"行数(1-6)", c1, row1(4));
     add_edit(h, IDC_MAX_LINES, c1e, row1(4));

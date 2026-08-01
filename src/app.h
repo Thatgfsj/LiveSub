@@ -91,6 +91,8 @@ private:
     void stop_pipeline(AsrPipeline& p);
     // 唯一共享字幕窗口（麦克风主轨上半区 / 电脑声音第二轨下半区），惰性创建
     bool ensure_window();
+    // 模型文件检测：切换模型大小后对应文件缺失 → 提示并打开下载器
+    void check_model_files();
 
     Config cfg_;
 

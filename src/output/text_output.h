@@ -19,7 +19,7 @@ public:
     TextOutput(const TextOutput&) = delete;
     TextOutput& operator=(const TextOutput&) = delete;
 
-    void configure(const Config& c) { cfg_ = c; }
+    void configure(const Config& c);  // 实现见 cpp（默认路径自动按时间命名）
 
     // 更新当前字幕（partial: 部分结果；final: 定稿句）
     void update(const std::string& partial, const std::string& finalized);

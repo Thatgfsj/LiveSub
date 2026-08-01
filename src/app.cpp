@@ -468,6 +468,9 @@ bool App::run_wav_test(const std::string& wav_path) {
 void App::apply_config() {
     cfg_.save(cfg_.path());
 
+    // 模型切换检测：切换到没有对应模型文件的大小 → 提示并打开下载器
+    check_model_files();
+
     // 共享窗口需销毁重建才能应用位置/样式改动
     // （ensure_window 只做懒创建，窗口存在时不会重建 → 新配置不生效）
     window_.destroy();
@@ -477,6 +480,45 @@ void App::apply_config() {
     if (mic_on) { stop_pipeline(mic_); start_pipeline(mic_, true); }
     if (pc_on)  { stop_pipeline(pc_);  start_pipeline(pc_, false); }
     logf("[app] 设置已应用\n");
+}
+
+// 切换模型大小后，检查对应模型文件是否存在/完整；
+// 缺失 → 弹窗提示并可直接打开 model-dl.exe（带 --auto 直接下载对应大小）
+void App::check_model_files() {
+    const std::string mp = resolve_path("model");
+    std::string main_f, proj_f;
+    if (cfg_.model_size == "small") {
+        main_f = mp + "\\Qwen3-ASR-0.6B-Q8_0.gguf";
+        proj_f = mp + "\\mmproj-Qwen3-ASR-0.6B-bf16.gguf";
+    } else {
+        main_f = mp + "\\Qwen3-ASR-1.7B-Q8_0.gguf";
+        proj_f = mp + "\\mmproj-Qwen3-ASR-1.7B-bf16.gguf";
+    }
+    // 文件大小检查（与启动检测一致：主模型 1GB/500MB，编码器 100MB）
+    auto size_ok = [](const std::string& p, long long min_bytes) {
+        FILE* f = fopen(p.c_str(), "rb");
+        if (!f) return false;
+        _fseeki64(f, 0, SEEK_END);
+        const long long sz = _ftelli64(f);
+        fclose(f);
+        return sz > min_bytes;
+    };
+    const bool main_ok = size_ok(main_f, cfg_.model_size == "small" ? 500000000LL : 1000000000LL);
+    const bool proj_ok = size_ok(proj_f, 100000000LL);
+    if (main_ok && proj_ok) return;
+
+    const std::string which = (cfg_.model_size == "small") ? "小模型（0.6B）" : "大模型（1.7B）";
+    std::string miss;
+    if (!main_ok) miss += "主模型文件未找到或不完整:\n  " + main_f;
+    if (!proj_ok) miss += std::string(miss.empty() ? "" : "\n") + "音频编码器未找到或不完整:\n  " + proj_f;
+    const std::wstring msg =
+        utf8_to_wide(which + "的" + miss + "\n\n是否现在打开模型下载器下载？");
+    const int ret = MessageBoxW(nullptr, msg.c_str(), L"LiveSub 模型缺失",
+                                MB_YESNO | MB_ICONWARNING);
+    if (ret == IDYES) {
+        const wchar_t* arg = (cfg_.model_size == "small") ? L"--auto --small" : L"--auto --large";
+        ShellExecuteW(nullptr, L"open", L"model-dl.exe", arg, nullptr, SW_SHOWNORMAL);
+    }
 }
 
 void App::open_settings() {
@@ -494,6 +536,11 @@ void App::run() {
 
 void App::shutdown() {
     if (shutdown_done_.exchange(true)) return;
+    // 先销毁托盘与字幕窗口：点"退出"后界面立刻消失，
+    // 避免模型释放（asr_.free() 可能耗时数秒）期间看起来"没反应"，被误以为要点两次
+    tray_.destroy();
+    tray_ready_ = false;
+    window_.destroy();
     asr_running_ = false;
     if (mic_.queue) mic_.queue->stop();
     if (pc_.queue)  pc_.queue->stop();
@@ -501,6 +548,4 @@ void App::shutdown() {
     stop_pipeline(mic_);
     stop_pipeline(pc_);
     asr_.free();
-    tray_.destroy();
-    tray_ready_ = false;
 }
