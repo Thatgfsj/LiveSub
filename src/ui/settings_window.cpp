@@ -83,8 +83,8 @@ void SettingsWindow::fill_fields() {
     set_edit(IDC_FONT_SIZE,  std::to_wstring((int)cfg_.font_size));
     set_edit(IDC_FONT_COLOR, utf8_to_wide(cfg_.font_color));
     set_edit(IDC_BG_COLOR,   utf8_to_wide(cfg_.bg_color));
-    set_edit(IDC_WIN_X,      std::to_wstring(cfg_.center_x));
-    set_edit(IDC_WIN_Y,      std::to_wstring(cfg_.center_y));
+    set_edit(IDC_WIN_X,      std::to_wstring(cfg_.pos_x));
+    set_edit(IDC_WIN_Y,      std::to_wstring(cfg_.pos_y));
     {
         // 背景透明度：从 bg_color 的 alpha 通道换算为百分比显示
         const auto c = parse_color(cfg_.bg_color).value_or(0xC0000000u);
@@ -126,8 +126,8 @@ void SettingsWindow::read_fields() {
     cfg_.font_size         = (float)std::max(12, edit_int(IDC_FONT_SIZE, (int)cfg_.font_size));
     cfg_.font_color        = edit_str(IDC_FONT_COLOR);
     cfg_.bg_color          = edit_str(IDC_BG_COLOR);
-    cfg_.center_x          = edit_int(IDC_WIN_X, cfg_.center_x);
-    cfg_.center_y          = edit_int(IDC_WIN_Y, cfg_.center_y);
+    cfg_.pos_x             = std::max(0, std::min(100, edit_int(IDC_WIN_X, cfg_.pos_x)));
+    cfg_.pos_y             = std::max(0, std::min(100, edit_int(IDC_WIN_Y, cfg_.pos_y)));
     {
         // 背景透明度：0-100% 写回 bg_color 的 alpha（保留原 RGB）
         int pct = edit_int(IDC_BG_ALPHA, 75);
@@ -239,9 +239,9 @@ void SettingsWindow::run() {
     CreateWindowW(L"STATIC", L"0=全透明 100=不透明（默认75）", WS_CHILD | WS_VISIBLE | SS_LEFT,
                   LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 300, 18, h,
                   nullptr, GetModuleHandleW(nullptr), nullptr);
-    add_label(h, 0, L"中心 X, Y", PAD, next());
+    add_label(h, 0, L"位置 %", PAD, next());
     add_edit(h, IDC_WIN_X, L"", LABEL_W + PAD, y - ROW_H + 1);
-    CreateWindowW(L"STATIC", L"0=居中；正=右/下移，负=左/上移（默认 0, 300 靠下）",
+    CreateWindowW(L"STATIC", L"屏幕百分比 0-100；50=居中（默认 50, 85 居中偏下）",
                   WS_CHILD | WS_VISIBLE | SS_LEFT,
                   LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 320, 18, h,
                   nullptr, GetModuleHandleW(nullptr), nullptr);

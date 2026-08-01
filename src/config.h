@@ -34,8 +34,8 @@ struct Config {
     std::string bg_color    = "#33000000"; // AARRGGBB 半透明黑（透明度 20%）
     int   window_w          = 1280;
     int   window_h          = 260;
-    int   center_x          = 0;       // 中心点 X：0=水平居中，正=右移，负=左移（像素）
-    int   center_y          = 300;     // 中心点 Y：0=垂直居中，正=下移（默认靠下）
+    int   pos_x             = 50;      // 水平位置（屏幕宽百分比 0-100，50=居中，越大越靠右）
+    int   pos_y             = 85;      // 垂直位置（屏幕高百分比 0-100，50=居中，越大越靠下）
     int   max_lines         = 2;       // 固定 2 行：上一句 + 当前句
     bool  always_on_top     = true;
     bool  click_through     = true;    // 鼠标穿透（默认开启，不挡直播操作）

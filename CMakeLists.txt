@@ -90,6 +90,21 @@ if(WIN32)
     target_compile_definitions(livesub PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
+# MinGW 运行时（libstdc++ 等）：构建时从编译器目录复制，保证打包/发布可独立运行
+if(MINGW)
+    get_filename_component(MINGW_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set(MINGW_RUNTIME_DLLS)
+    foreach(_dll libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
+        if(EXISTS "${MINGW_BIN_DIR}/${_dll}")
+            list(APPEND MINGW_RUNTIME_DLLS "${MINGW_BIN_DIR}/${_dll}")
+        endif()
+    endforeach()
+    if(MINGW_RUNTIME_DLLS)
+        add_custom_command(TARGET livesub POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${MINGW_RUNTIME_DLLS} $<TARGET_FILE_DIR:livesub>)
+    endif()
+endif()
+
 # 预编译模式：运行时复制 DLL（ggml-cpu-* 为按 CPU 特性拆分的变体，运行时加载）
 if(LIVESUB_PREBUILT_VULKAN)
     add_custom_command(TARGET livesub POST_BUILD

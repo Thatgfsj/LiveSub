@@ -176,8 +176,8 @@ Config Config::load(const std::string& path) {
     c.bg_color           = get_str(kv, "ui.bg_color", c.bg_color);
     c.window_w           = get_int(kv, "ui.window_w", c.window_w);
     c.window_h           = get_int(kv, "ui.window_h", c.window_h);
-    c.center_x           = get_int(kv, "ui.center_x", c.center_x);
-    c.center_y           = get_int(kv, "ui.center_y", c.center_y);
+    c.pos_x              = get_int(kv, "ui.pos_x", c.pos_x);
+    c.pos_y              = get_int(kv, "ui.pos_y", c.pos_y);
     c.max_lines          = get_int(kv, "ui.max_lines", c.max_lines);
     c.always_on_top      = get_bool(kv, "ui.always_on_top", c.always_on_top);
     c.click_through      = get_bool(kv, "ui.click_through", c.click_through);
@@ -230,8 +230,8 @@ void Config::save(const std::string& path) const {
     w("bg_color = " + bg_color);
     w("window_w = " + std::to_string(window_w));
     w("window_h = " + std::to_string(window_h));
-    w("center_x = " + std::to_string(center_x));
-    w("center_y = " + std::to_string(center_y));
+    w("pos_x = " + std::to_string(pos_x));
+    w("pos_y = " + std::to_string(pos_y));
     w("max_lines = " + std::to_string(max_lines));
     w("always_on_top = " + std::string(always_on_top ? "true" : "false"));
     w("click_through = " + std::string(click_through ? "true" : "false"));

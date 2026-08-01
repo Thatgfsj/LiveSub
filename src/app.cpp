@@ -95,9 +95,9 @@ bool App::init(const std::string& config_path, bool enable_capture) {
     st.bg_color      = parse_color(cfg_.bg_color).value_or(0xC0000000);
     st.window_w      = cfg_.window_w;
     st.window_h      = cfg_.window_h;
-    // 中心点定位：0=居中，正=右/下偏移（像素）
-    st.window_x      = GetSystemMetrics(SM_CXSCREEN) / 2 + cfg_.center_x - cfg_.window_w / 2;
-    st.window_y      = GetSystemMetrics(SM_CYSCREEN) / 2 + cfg_.center_y - cfg_.window_h / 2;
+    // 百分比定位：pos_x/pos_y 为屏幕宽高的百分比（50=居中，越大越靠右/下）
+    st.window_x      = GetSystemMetrics(SM_CXSCREEN) * cfg_.pos_x / 100 - cfg_.window_w / 2;
+    st.window_y      = GetSystemMetrics(SM_CYSCREEN) * cfg_.pos_y / 100 - cfg_.window_h / 2;
     st.max_lines     = cfg_.max_lines;
     st.always_on_top = cfg_.always_on_top;
     st.click_through = cfg_.click_through;
@@ -437,9 +437,9 @@ void App::apply_config() {
     st.bg_color      = parse_color(cfg_.bg_color).value_or(0xC0000000);
     st.window_w      = cfg_.window_w;
     st.window_h      = cfg_.window_h;
-    // 中心点定位：0=居中，正=右/下偏移（像素）
-    st.window_x      = GetSystemMetrics(SM_CXSCREEN) / 2 + cfg_.center_x - cfg_.window_w / 2;
-    st.window_y      = GetSystemMetrics(SM_CYSCREEN) / 2 + cfg_.center_y - cfg_.window_h / 2;
+    // 百分比定位：pos_x/pos_y 为屏幕宽高的百分比（50=居中，越大越靠右/下）
+    st.window_x      = GetSystemMetrics(SM_CXSCREEN) * cfg_.pos_x / 100 - cfg_.window_w / 2;
+    st.window_y      = GetSystemMetrics(SM_CYSCREEN) * cfg_.pos_y / 100 - cfg_.window_h / 2;
     st.max_lines     = cfg_.max_lines;
     st.always_on_top = cfg_.always_on_top;
     st.click_through = cfg_.click_through;
