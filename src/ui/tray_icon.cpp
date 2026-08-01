@@ -110,6 +110,7 @@ void TrayIcon::show_menu() {
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, 1, L"设置…");
     AppendMenuW(menu, MF_STRING, 2, L"显示/隐藏字幕");
+    AppendMenuW(menu, MF_STRING, 5, voice_input_ ? L"关闭语音输入" : L"开启语音输入");
     AppendMenuW(menu, MF_STRING, 3, recording_ ? L"结束记录讲话稿" : L"开始记录讲话稿");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, 4, L"退出");
@@ -125,6 +126,7 @@ void TrayIcon::show_menu() {
         case 2: if (on_toggle_window) on_toggle_window(); break;
         case 3: if (on_toggle_record) on_toggle_record(); break;
         case 4: if (on_quit) on_quit(); break;
+        case 5: if (on_toggle_voice) on_toggle_voice(); break;
     }
 }
 

@@ -38,7 +38,7 @@ struct Config {
     int   center_y          = 300;     // 中心点 Y：0=垂直居中，正=下移（默认靠下）
     int   max_lines         = 2;       // 固定 2 行：上一句 + 当前句
     bool  always_on_top     = true;
-    bool  click_through     = false;   // 鼠标穿透
+    bool  click_through     = true;    // 鼠标穿透（默认开启，不挡直播操作）
     bool  show_status       = true;    // 显示"聆听中…"状态
     int   fade_in_ms        = 300;     // 字幕出现渐入（毫秒）
     int   fade_out_ms       = 500;     // 字幕消失渐出（毫秒）

@@ -45,6 +45,20 @@ bool App::init(const std::string& config_path, bool enable_capture) {
         }
     };
     tray_.on_quit = [this]() { PostQuitMessage(0); };
+    tray_.on_toggle_voice = [this]() {
+        if (voice_input_.enabled()) {
+            voice_input_.set_enabled(false);
+            tray_.set_voice_input(false);
+            window_.set_status("语音输入已关闭");
+            logf("[app] 语音输入已关闭\n");
+        } else {
+            voice_input_.set_enabled(true);
+            tray_.set_voice_input(true);
+            window_.set_status("语音输入已开启：说话将输入到当前窗口");
+            update_tray(TrayIcon::State::Ready, "LiveSub 语音输入已开启");
+            logf("[app] 语音输入已开启\n");
+        }
+    };
     tray_.on_toggle_record = [this]() {
         if (output_.recording()) {
             output_.stop_recording();
@@ -362,6 +376,10 @@ void App::asr_loop() {
                 // 讲话稿记录：定稿句实时写入桌面文件
                 if (finalize) {
                     output_.append_record(r.text);
+                    // 语音输入：定稿句输入到当前焦点窗口（句末加空格）
+                    if (voice_input_.enabled()) {
+                        voice_input_.commit_text(r.text + " ");
+                    }
                 }
                 window_.set_text(full);
                 if (finalize) window_.set_status("");

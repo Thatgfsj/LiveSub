@@ -22,6 +22,7 @@
 #include "ui/settings_window.h"
 #include "ui/tray_icon.h"
 #include "output/text_output.h"
+#include "input/voice_input.h"
 
 // 小工具
 inline int64_t now_ms() {
@@ -75,6 +76,9 @@ private:
     TextOutput output_;
     TrayIcon tray_;
     bool tray_ready_ = false;
+
+    // 语音输入（开启后定稿句注入当前焦点窗口）
+    VoiceInput voice_input_;
 
     // 托盘状态同步
     void update_tray(TrayIcon::State s, const std::string& tip);

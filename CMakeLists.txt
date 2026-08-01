@@ -71,6 +71,7 @@ add_executable(livesub WIN32
     src/ui/settings_window.cpp
     src/ui/tray_icon.cpp
     src/output/text_output.cpp
+    src/input/voice_input.cpp
 )
 
 target_include_directories(livesub PRIVATE src)
