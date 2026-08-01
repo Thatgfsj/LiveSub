@@ -1,0 +1,23 @@
+# 构建产物
+build/
+build-*/
+dist/
+
+# 模型（体积大且为 Qwen 权重，不纳入仓库；按 README 指引自行下载）
+models/
+model/
+
+# 第三方源码（按 README 指引获取 llama.cpp）
+third_party/
+
+# 运行时产物
+config.ini
+livesub.log
+subtitles.txt
+subtitles.srt
+
+# 工具
+*.exe
+*.dll
+.vs/
+CMakeCache.txt
