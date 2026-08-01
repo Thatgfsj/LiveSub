@@ -17,8 +17,9 @@ struct Config {
     int   silence_ms        = 800;     // 句末静音提交时间
 
     // [asr]
-    std::string model_path  = "models/Qwen3-ASR-1.7B-GGUF/Qwen3-ASR-1.7B-Q8_0.gguf";
-    std::string mmproj_path = "models/Qwen3-ASR-1.7B-GGUF/mmproj-Qwen3-ASR-1.7B-bf16.gguf";
+    std::string model_size  = "large";  // 模型大小：large=1.7B（更准/要求高） small=0.6B（更快/要求低）
+    std::string model_path  = "model/Qwen3-ASR-1.7B-Q8_0.gguf";
+    std::string mmproj_path = "model/mmproj-Qwen3-ASR-1.7B-bf16.gguf";
     int  n_threads          = 18;      // 推理线程数
     int  gpu_layers         = 999;     // 主模型 GPU 层数（Vulkan；999=全部）
     int  n_batch            = 256;
@@ -36,7 +37,7 @@ struct Config {
     std::string stroke_color = "#000000"; // 描边颜色（默认黑色）
     int   stroke_width     = 2;        // 描边粗细（像素）
     int   window_w          = 1280;
-    int   window_h          = 260;
+    int   window_h          = 480;   // 双轨字幕窗口高度（上下分区）
     int   pos_x             = 50;      // 水平位置（屏幕宽百分比 0-100，50=居中，越大越靠右）
     int   pos_y             = 85;      // 垂直位置（屏幕高百分比 0-100，50=居中，越大越靠下）
     int   max_lines         = 2;       // 固定 2 行：上一句 + 当前句

@@ -114,6 +114,7 @@ bool SubtitleWindow::create(const Style& s, std::wstring* err) {
 
 void SubtitleWindow::release_d2d() {
     if (layout_)         { layout_->Release();         layout_         = nullptr; }
+    if (layout2_)        { layout2_->Release();        layout2_        = nullptr; }
     if (text_format_)    { text_format_->Release();    text_format_    = nullptr; }
     if (text_brush_)     { text_brush_->Release();     text_brush_     = nullptr; }
     if (interim_brush_)  { interim_brush_->Release();  interim_brush_  = nullptr; }
@@ -225,9 +226,16 @@ void SubtitleWindow::render() {
         }
     }
 
-    // 3. 布局（文本变化时重建）
+    // 3. 布局（文本变化时重建；主轨上半区 + 第二轨下半区）
     if (layout_dirty_.exchange(false)) {
-        rebuild_layout(full, (float)dib_w_, (float)dib_h_);
+        std::wstring second;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            second = second_text_;
+        }
+        const float half_h = (float)dib_h_ * 0.5f;
+        rebuild_layout(full, (float)dib_w_, half_h);
+        rebuild_layout2(second, (float)dib_w_, half_h);
     }
 
     // 4. D2D 画到内存 DIB
@@ -242,25 +250,16 @@ void SubtitleWindow::render() {
         }
 
         if (layout_) {
-            // 描边（艺术字）：8 方向偏移绘制描边色，再原位绘制文字色
-            if (style_.stroke_enabled && stroke_brush_ && style_.stroke_width > 0) {
-                const float sw = (float)style_.stroke_width;
-                const float offs[8][2] = {
-                    {-sw, 0}, {sw, 0}, {0, -sw}, {0, sw},
-                    {-sw, -sw}, {sw, -sw}, {-sw, sw}, {sw, sw},
-                };
-                for (auto& o : offs) {
-                    target_->DrawTextLayout(D2D1::Point2F(o[0], o[1]), layout_,
-                                            stroke_brush_, D2D1_DRAW_TEXT_OPTIONS_CLIP);
-                }
-            }
-            target_->DrawTextLayout(D2D1::Point2F(0, 0), layout_, text_brush_,
-                                    D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            draw_layout(layout_, 0.0f, 0.0f, true);
         } else if (!full.empty() && text_format_) {
             const float pad = style_.font_size * 0.4f;
-            D2D1_RECT_F trc = D2D1::RectF(pad, pad, (float)dib_w_ - pad, (float)dib_h_ - pad);
+            D2D1_RECT_F trc = D2D1::RectF(pad, pad, (float)dib_w_ - pad, (float)dib_h_ * 0.5f - pad);
             target_->DrawTextW(full.c_str(), (UINT32)full.size(), text_format_, trc,
                                text_brush_, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        }
+        // 第二轨（下半区）
+        if (layout2_) {
+            draw_layout(layout2_, 0.0f, (float)dib_h_ * 0.5f, true);
         }
         if (FAILED(target_->EndDraw())) return;
     }
@@ -281,6 +280,15 @@ void SubtitleWindow::set_text(const std::string& text, size_t confirmed_offset) 
         content_ = to_wide(text);
     }
     confirmed_offset_ = confirmed_offset;
+    layout_dirty_ = true;
+}
+
+void SubtitleWindow::set_second_text(const std::string& text, size_t confirmed_offset) {
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        second_text_ = to_wide(text);
+    }
+    second_confirmed_ = confirmed_offset;
     layout_dirty_ = true;
 }
 
@@ -353,6 +361,23 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
     layout_ = l;
 }
 
+// 绘制 layout（描边 + 填充），(x, y) 为区域左上角
+void SubtitleWindow::draw_layout(IDWriteTextLayout* l, float x, float y, bool stroke) {
+    if (!l || !target_) return;
+    if (stroke && style_.stroke_enabled && stroke_brush_ && style_.stroke_width > 0) {
+        const float sw = (float)style_.stroke_width;
+        const float offs[8][2] = {
+            {-sw, 0}, {sw, 0}, {0, -sw}, {0, sw},
+            {-sw, -sw}, {sw, -sw}, {-sw, sw}, {sw, sw},
+        };
+        for (auto& o : offs) {
+            target_->DrawTextLayout(D2D1::Point2F(x + o[0], y + o[1]), l,
+                                    stroke_brush_, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        }
+    }
+    target_->DrawTextLayout(D2D1::Point2F(x, y), l, text_brush_, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+}
+
 // interim（未确认尾部）半透明样式：confirmed 偏移之后的部分
 void SubtitleWindow::apply_interim_style(IDWriteTextLayout* l, const std::wstring& t) {
     if (!l || !interim_brush_ || confirmed_offset_ == std::string::npos) return;
@@ -361,6 +386,44 @@ void SubtitleWindow::apply_interim_style(IDWriteTextLayout* l, const std::wstrin
                                    (UINT32)(t.size() - confirmed_offset_)};
         l->SetDrawingEffect(interim_brush_, range);
     }
+}
+
+// 第二轨布局（与主轨同逻辑：长句缩字号 + interim 样式）
+void SubtitleWindow::rebuild_layout2(const std::wstring& text, float w, float h) {
+    if (layout2_) { layout2_->Release(); layout2_ = nullptr; }
+    if (!dwrite_factory_ || !text_format_ || text.empty()) return;
+
+    auto make = [&](const std::wstring& t) -> IDWriteTextLayout* {
+        IDWriteTextLayout* l = nullptr;
+        if (FAILED(dwrite_factory_->CreateTextLayout(t.c_str(), (UINT32)t.size(),
+                                                     text_format_, w, h, &l))) {
+            return nullptr;
+        }
+        return l;
+    };
+
+    const UINT32 max = (UINT32)std::max(1, style_.max_lines);
+    const float min_size = style_.font_size * 0.5f;
+
+    IDWriteTextLayout* l = make(text);
+    if (!l) return;
+
+    float size = style_.font_size;
+    for (int attempt = 0; attempt < 14; attempt++) {
+        DWRITE_TEXT_RANGE range = {0, (UINT32)text.size()};
+        l->SetFontSize(size, range);
+        UINT32 lines = 0;
+        l->GetLineMetrics(nullptr, 0, &lines);
+        if (lines <= max || size <= min_size) break;
+        size *= 0.92f;
+    }
+    if (interim_brush_ && second_confirmed_ != std::string::npos &&
+        second_confirmed_ < text.size()) {
+        DWRITE_TEXT_RANGE range = {(UINT32)second_confirmed_,
+                                   (UINT32)(text.size() - second_confirmed_)};
+        l->SetDrawingEffect(interim_brush_, range);
+    }
+    layout2_ = l;
 }
 
 std::wstring SubtitleWindow::to_wide(const std::string& s) const {
@@ -380,6 +443,7 @@ void SubtitleWindow::destroy() {
         std::lock_guard<std::mutex> lk(mtx_);
         content_.clear();
         status_.clear();
+        second_text_.clear();
     }
     release_d2d();
     if (dib_) { DeleteObject(dib_); dib_ = nullptr; }

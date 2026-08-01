@@ -41,9 +41,11 @@ public:
     bool create(const Style& s, std::wstring* err = nullptr);
     void destroy();
 
-    // 线程安全：更新字幕内容（UTF-8）；confirmed_offset 为已确认部分偏移
+    // 线程安全：更新主轨字幕内容（UTF-8）；confirmed_offset 为已确认部分偏移
     // （其前实色显示，其后为未确认 interim 半透明显示）
     void set_text(const std::string& text, size_t confirmed_offset = std::string::npos);
+    // 第二轨（电脑字幕）：更新下半区内容
+    void set_second_text(const std::string& text, size_t confirmed_offset = std::string::npos);
     // 设置状态文本（如"识别中…"），UTF-8
     void set_status(const std::string& status);
 
@@ -70,14 +72,19 @@ private:
     ID2D1SolidColorBrush* stroke_brush_ = nullptr;  // 描边色（默认黑）
     IDWriteFactory* dwrite_factory_ = nullptr;
     IDWriteTextFormat* text_format_ = nullptr;
-    IDWriteTextLayout* layout_ = nullptr; // 布局缓存
+    IDWriteTextLayout* layout_ = nullptr;  // 主轨布局缓存
+    IDWriteTextLayout* layout2_ = nullptr; // 第二轨布局缓存
 
     // 文本变化时重建布局（跨线程标记）
     std::atomic<bool> layout_dirty_{true};
     float last_layout_size_ = 0.0f; // 上次布局字号（平滑用，避免缩放跳变）
-    size_t confirmed_offset_ = std::string::npos; // 已确认部分偏移（interim 样式）
+    size_t confirmed_offset_ = std::string::npos; // 主轨已确认偏移（interim 样式）
+    size_t second_confirmed_ = std::string::npos; // 第二轨已确认偏移
+    std::wstring second_text_;                    // 第二轨文本（互斥锁保护）
     void rebuild_layout(const std::wstring& text, float w, float h);
+    void rebuild_layout2(const std::wstring& text, float w, float h);
     void apply_interim_style(IDWriteTextLayout* l, const std::wstring& t);
+    void draw_layout(IDWriteTextLayout* l, float x, float y, bool stroke);
 
     // 分层窗口资源
     HDC mem_dc_ = nullptr;

@@ -202,6 +202,19 @@ Config Config::load(const std::string& path) {
     c.pc_pos_y           = get_int(kv, "tracks.pc_pos_y", c.pc_pos_y);
 
     c.log_level          = get_int(kv, "log.log_level", c.log_level);
+
+    // 模型路径：按 model_size 解析默认路径（用户自定义路径时保留）
+    if (c.model_size != "small") c.model_size = "large";
+    const bool is_large_default = (c.model_path.find("Qwen3-ASR-1.7B") != std::string::npos) ||
+                                  (c.model_path == "model/Qwen3-ASR-1.7B-Q8_0.gguf");
+    const bool is_small_default = (c.model_path.find("Qwen3-ASR-0.6B") != std::string::npos);
+    if (c.model_size == "small" && (is_large_default || c.model_path.empty())) {
+        c.model_path  = "model/Qwen3-ASR-0.6B-Q8_0.gguf";
+        c.mmproj_path = "model/mmproj-Qwen3-ASR-0.6B-bf16.gguf";
+    } else if (c.model_size == "large" && (is_small_default || c.model_path.empty())) {
+        c.model_path  = "model/Qwen3-ASR-1.7B-Q8_0.gguf";
+        c.mmproj_path = "model/mmproj-Qwen3-ASR-1.7B-bf16.gguf";
+    }
     return c;
 }
 
@@ -223,6 +236,7 @@ void Config::save(const std::string& path) const {
     w("silence_ms = " + std::to_string(silence_ms));
     w("");
     w("[asr]");
+    w("model_size = " + model_size);
     w("model_path = " + model_path);
     w("mmproj_path = " + mmproj_path);
     w("n_threads = " + std::to_string(n_threads));

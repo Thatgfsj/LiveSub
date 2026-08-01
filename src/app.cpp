@@ -35,7 +35,8 @@ void App::update_tray(TrayIcon::State s, const std::string& tip) {
 bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
     if (p.enabled.load()) return true;
 
-    // 窗口
+    // 窗口（两个轨道共用主窗口：主轨上半区 / 第二轨下半区；
+    //        pc 轨启动时若主窗口未创建则创建）
     SubtitleWindow::Style st;
     st.font_family   = utf8_to_wide(cfg_.font_family);
     st.font_size     = cfg_.font_size;
@@ -50,10 +51,9 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
     st.fade_in_ms    = cfg_.fade_in_ms;
     st.fade_out_ms   = cfg_.fade_out_ms;
     st.fps           = cfg_.fps;
-    const int px = is_mic ? cfg_.mic_pos_x : cfg_.pc_pos_x;
-    const int py = is_mic ? cfg_.mic_pos_y : cfg_.pc_pos_y;
-    st.window_x = GetSystemMetrics(SM_CXSCREEN) * px / 100 - cfg_.window_w / 2;
-    st.window_y = GetSystemMetrics(SM_CYSCREEN) * py / 100 - cfg_.window_h / 2;
+    // 位置：统一使用 ui.pos_x/pos_y（默认 50/85 靠下，不在屏幕中间）
+    st.window_x = GetSystemMetrics(SM_CXSCREEN) * cfg_.pos_x / 100 - cfg_.window_w / 2;
+    st.window_y = GetSystemMetrics(SM_CYSCREEN) * cfg_.pos_y / 100 - cfg_.window_h / 2;
     std::wstring err;
     if (!p.window.create(st, &err)) {
         logf("[%s] 字幕窗口创建失败: %ls\n", p.name.c_str(), err.c_str());
@@ -348,7 +348,11 @@ bool App::process_pipeline(AsrPipeline& p) {
     if (r.ok) {
         const std::string full = p.merger.update(r.text, finalize, now_ms());
         if (!r.text.empty()) {
-            p.window.set_text(full, p.merger.confirmed_offset());
+            if (&p == &mic_) {
+                p.window.set_text(full, p.merger.confirmed_offset());
+            } else {
+                p.window.set_second_text(full, p.merger.confirmed_offset());
+            }
             if (finalize) {
                 p.window.set_status("");
                 // 语音输入：只对麦克风轨定稿句输入

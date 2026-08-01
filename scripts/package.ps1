@@ -88,6 +88,7 @@ min_speech_ms = 250
 silence_ms = 800
 
 [asr]
+model_size = large
 model_path = model\Qwen3-ASR-1.7B-Q8_0.gguf
 mmproj_path = model\mmproj-Qwen3-ASR-1.7B-bf16.gguf
 n_threads = 18
@@ -107,7 +108,7 @@ stroke_enabled = true
 stroke_color = #000000
 stroke_width = 2
 window_w = 1280
-window_h = 260
+window_h = 480
 pos_x = 50
 pos_y = 85
 max_lines = 2

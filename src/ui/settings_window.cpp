@@ -30,6 +30,13 @@ enum {
     IDC_WIN_Y       = 1018,
     IDC_BG_ALPHA    = 1019,
     IDC_MAX_LINES   = 1020,
+    IDC_MODEL_BIG   = 1021,
+    IDC_MODEL_SMALL = 1022,
+    IDC_STROKE      = 1023,
+    IDC_STROKE_COLOR = 1024,
+    IDC_STROKE_W    = 1025,
+    IDC_MIC_TRACK   = 1026,
+    IDC_PC_TRACK    = 1027,
 };
 
 static const int LABEL_W = 120, EDIT_W = 90, ROW_H = 30, PAD = 12;
@@ -93,6 +100,19 @@ void SettingsWindow::fill_fields() {
         set_edit(IDC_BG_ALPHA, std::to_wstring(pct));
     }
     set_edit(IDC_MAX_LINES, std::to_wstring(cfg_.max_lines));
+    // 模型大小
+    if (cfg_.model_size == "small") {
+        CheckRadioButton(hwnd_, IDC_MODEL_BIG, IDC_MODEL_SMALL, IDC_MODEL_SMALL);
+    } else {
+        CheckRadioButton(hwnd_, IDC_MODEL_BIG, IDC_MODEL_SMALL, IDC_MODEL_BIG);
+    }
+    // 描边
+    CheckDlgButton(hwnd_, IDC_STROKE, cfg_.stroke_enabled ? BST_CHECKED : BST_UNCHECKED);
+    set_edit(IDC_STROKE_COLOR, utf8_to_wide(cfg_.stroke_color));
+    set_edit(IDC_STROKE_W, std::to_wstring(cfg_.stroke_width));
+    // 双轨
+    CheckDlgButton(hwnd_, IDC_MIC_TRACK, cfg_.mic_enabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd_, IDC_PC_TRACK,  cfg_.pc_enabled  ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwnd_, IDC_TOP,        cfg_.always_on_top ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwnd_, IDC_CLICK_THRU, cfg_.click_through ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwnd_, IDC_WRITE_TEXT, cfg_.write_text ? BST_CHECKED : BST_UNCHECKED);
@@ -140,6 +160,19 @@ void SettingsWindow::read_fields() {
         cfg_.bg_color = buf;
     }
     cfg_.max_lines = std::max(1, std::min(6, edit_int(IDC_MAX_LINES, cfg_.max_lines)));
+    // 模型大小
+    if (IsDlgButtonChecked(hwnd_, IDC_MODEL_SMALL) == BST_CHECKED) {
+        cfg_.model_size = "small";
+    } else {
+        cfg_.model_size = "large";
+    }
+    // 描边
+    cfg_.stroke_enabled = IsDlgButtonChecked(hwnd_, IDC_STROKE) == BST_CHECKED;
+    cfg_.stroke_color   = edit_str(IDC_STROKE_COLOR);
+    cfg_.stroke_width   = std::max(0, std::min(8, edit_int(IDC_STROKE_W, cfg_.stroke_width)));
+    // 双轨
+    cfg_.mic_enabled = IsDlgButtonChecked(hwnd_, IDC_MIC_TRACK) == BST_CHECKED;
+    cfg_.pc_enabled  = IsDlgButtonChecked(hwnd_, IDC_PC_TRACK) == BST_CHECKED;
     cfg_.always_on_top     = IsDlgButtonChecked(hwnd_, IDC_TOP) == BST_CHECKED;
     cfg_.click_through     = IsDlgButtonChecked(hwnd_, IDC_CLICK_THRU) == BST_CHECKED;
     cfg_.write_text        = IsDlgButtonChecked(hwnd_, IDC_WRITE_TEXT) == BST_CHECKED;
@@ -203,7 +236,7 @@ void SettingsWindow::run() {
     RegisterClassExW(&wc);
 
     const int W = LABEL_W + EDIT_W + PAD * 3 + 330; // 560：容纳说明文字与刷新按钮
-    const int H = 14 * ROW_H + 90;
+    const int H = 17 * ROW_H + 90;
     hwnd_ = CreateWindowExW(0, cls, L"LiveSub 设置", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
                             CW_USEDEFAULT, CW_USEDEFAULT, W, H,
                             nullptr, nullptr, hinst, this);
@@ -246,6 +279,40 @@ void SettingsWindow::run() {
     add_edit(h, IDC_MAX_LINES, L"", LABEL_W + PAD, y - ROW_H + 1);
     CreateWindowW(L"STATIC", L"1-6（默认2：上一句+当前句）", WS_CHILD | WS_VISIBLE | SS_LEFT,
                   LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 300, 18, h,
+                  nullptr, GetModuleHandleW(nullptr), nullptr);
+
+    // 模型管理
+    add_label(h, 0, L"模型", PAD, next());
+    CreateWindowW(L"BUTTON", L"大模型 1.7B（更准）", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+                  LABEL_W + PAD, y - ROW_H + 2, 170, 22, h,
+                  (HMENU)(INT_PTR)IDC_MODEL_BIG, hinst, nullptr);
+    CreateWindowW(L"BUTTON", L"小模型 0.6B（更快）", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+                  LABEL_W + PAD + 180, y - ROW_H + 2, 170, 22, h,
+                  (HMENU)(INT_PTR)IDC_MODEL_SMALL, hinst, nullptr);
+    CreateWindowW(L"STATIC", L"大=更准确/要求高（2.8GB）；小=更快/要求低（1.1GB）；保存后重启生效",
+                  WS_CHILD | WS_VISIBLE | SS_LEFT,
+                  LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 330, 18, h,
+                  nullptr, GetModuleHandleW(nullptr), nullptr);
+
+    // 描边
+    CreateWindowW(L"BUTTON", L"文字描边", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                  PAD, next(), 100, 22, h, (HMENU)(INT_PTR)IDC_STROKE, hinst, nullptr);
+    add_label(h, 0, L"描边色", PAD, next());
+    add_edit(h, IDC_STROKE_COLOR, L"", LABEL_W + PAD, y - ROW_H + 1);
+    add_label(h, 0, L"描边粗", PAD, next());
+    add_edit(h, IDC_STROKE_W, L"", LABEL_W + PAD, y - ROW_H + 1);
+    CreateWindowW(L"STATIC", L"颜色 #RRGGBB（默认黑）；粗细 1-8 像素", WS_CHILD | WS_VISIBLE | SS_LEFT,
+                  LABEL_W + EDIT_W + PAD + 8, y - ROW_H + 4, 300, 18, h,
+                  nullptr, GetModuleHandleW(nullptr), nullptr);
+
+    // 双轨
+    CreateWindowW(L"BUTTON", L"麦克风字幕", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                  PAD, next(), 120, 22, h, (HMENU)(INT_PTR)IDC_MIC_TRACK, hinst, nullptr);
+    CreateWindowW(L"BUTTON", L"电脑字幕", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                  PAD + 130, y - ROW_H + 2, 120, 22, h,
+                  (HMENU)(INT_PTR)IDC_PC_TRACK, hinst, nullptr);
+    CreateWindowW(L"STATIC", L"（也可在托盘右键快速切换）", WS_CHILD | WS_VISIBLE | SS_LEFT,
+                  PAD + 260, y - ROW_H + 4, 220, 18, h,
                   nullptr, GetModuleHandleW(nullptr), nullptr);
     add_label(h, 0, L"位置 %", PAD, next());
     add_edit(h, IDC_WIN_X, L"", LABEL_W + PAD, y - ROW_H + 1);

@@ -1,9 +1,10 @@
 // model-dl.exe：模型下载器（安装器调用 / 主程序首启兜底）
 // 用法: model-dl.exe [model_dir]
-// 下载 Qwen3-ASR-1.7B 模型（Q8_0 主模型 + BF16 音频编码器）到 model_dir
+// 启动时选择模型大小：
+//   - 大模型（1.7B）：更准确，要求更高性能，约 2.8GB（推荐）
+//   - 小模型（0.6B）：速度快、要求低，约 1.1GB
 #include <cstdio>
 #include <string>
-#include <vector>
 #include <thread>
 #include <atomic>
 #include <chrono>
@@ -13,40 +14,55 @@
 
 #include "tools/model_downloader.h"
 
-static const char* kMainUrl  = "https://hf-mirror.com/ggml-org/Qwen3-ASR-1.7B-GGUF/resolve/main/Qwen3-ASR-1.7B-Q8_0.gguf";
-static const char* kMainMir = "https://huggingface.co/ggml-org/Qwen3-ASR-1.7B-GGUF/resolve/main/Qwen3-ASR-1.7B-Q8_0.gguf";
-static const char* kProjUrl = "https://hf-mirror.com/ggml-org/Qwen3-ASR-1.7B-GGUF/resolve/main/mmproj-Qwen3-ASR-1.7B-bf16.gguf";
-static const char* kProjMir = "https://huggingface.co/ggml-org/Qwen3-ASR-1.7B-GGUF/resolve/main/mmproj-Qwen3-ASR-1.7B-bf16.gguf";
+static const char* kBaseMir = "https://hf-mirror.com/ggml-org/";
+static const char* kBaseHf  = "https://huggingface.co/ggml-org/";
+static const char* kRepo    = "Qwen3-ASR-1.7B-GGUF/resolve/main/";
+static const char* kRepoSm  = "Qwen3-ASR-0.6B-GGUF/resolve/main/";
 
-static const uint64_t kMainSize = 2165034944ull; // Q8_0 主模型字节数
-static const uint64_t kProjSize = 641773984ull;  // mmproj BF16 字节数
+struct ModelChoice {
+    const char* main_name;
+    const char* proj_name;
+    uint64_t main_size;
+    uint64_t proj_size;
+};
+
+static const ModelChoice kLarge = {
+    "Qwen3-ASR-1.7B-Q8_0.gguf", "mmproj-Qwen3-ASR-1.7B-bf16.gguf",
+    2165034944ull, 641773984ull,
+};
+static const ModelChoice kSmall = {
+    "Qwen3-ASR-0.6B-Q8_0.gguf", "mmproj-Qwen3-ASR-0.6B-bf16.gguf",
+    804749248ull, 378575520ull,
+};
 
 static HWND g_progress = nullptr, g_status = nullptr, g_done = nullptr;
 static std::atomic<bool> g_cancel{false};
+static std::atomic<bool> g_use_large{true};
 
 static void set_status(const std::wstring& s) {
     if (g_status) SetWindowTextW(g_status, s.c_str());
 }
 
-// 下载线程
-static void download_worker(const std::string& model_dir) {
-    const std::string main_path = model_dir + "\\Qwen3-ASR-1.7B-Q8_0.gguf";
-    const std::string proj_path = model_dir + "\\mmproj-Qwen3-ASR-1.7B-bf16.gguf";
+static void download_worker(const std::string& model_dir, const ModelChoice& mc,
+                            const std::string& repo) {
+    const std::string main_path = model_dir + "\\" + mc.main_name;
+    const std::string proj_path = model_dir + "\\" + mc.proj_name;
 
     const DownloadFile files[] = {
-        { kMainUrl, kMainMir, main_path, kMainSize },
-        { kProjUrl, kProjMir, proj_path, kProjSize },
+        { (std::string(kBaseMir) + repo + mc.main_name).c_str(),
+          (std::string(kBaseHf) + repo + mc.main_name).c_str(), main_path, mc.main_size },
+        { (std::string(kBaseMir) + repo + mc.proj_name).c_str(),
+          (std::string(kBaseHf) + repo + mc.proj_name).c_str(), proj_path, mc.proj_size },
     };
-    const wchar_t* names[] = { L"主模型 Q8_0 (2.0GB)", L"音频编码器 BF16 (0.6GB)" };
+    const wchar_t* names[] = { L"主模型", L"音频编码器" };
 
     bool all_ok = true;
     for (int i = 0; i < 2; i++) {
         set_status(std::wstring(L"正在下载 ") + names[i] + L" ...");
-        int retry = 0;
         int rc = 0;
-        do {
+        for (int retry = 0; retry < 8 && !g_cancel; retry++) {
             rc = download_file(files[i],
-                [i](uint64_t done, uint64_t total) -> bool {
+                [](uint64_t done, uint64_t total) -> bool {
                     if (g_cancel) return false;
                     if (total > 0) {
                         SendMessageW(g_progress, PBM_SETPOS, (WPARAM)(done * 100 / total), 0);
@@ -57,24 +73,18 @@ static void download_worker(const std::string& model_dir) {
                     return true;
                 }, nullptr);
             if (rc == 0) break;
-            if (rc == 1 && retry < 5) { // 未完成 → 续传重试
-                retry++;
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-            } else {
-                break;
-            }
-        } while (retry < 5 && !g_cancel);
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
         if (rc != 0) { all_ok = false; break; }
         SendMessageW(g_progress, PBM_SETPOS, 100, 0);
     }
 
-    set_status(all_ok ? L"模型下载完成！" : L"下载失败，请检查网络后重新运行安装程序");
+    set_status(all_ok ? L"模型下载完成！可以关闭本窗口" : L"下载失败，请检查网络后重新运行");
     EnableWindow(g_done, TRUE);
     if (all_ok) SetFocus(g_done);
 }
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
-    // 参数：模型目录（默认 exe 所在目录的 model\）
     std::string model_dir;
     {
         wchar_t buf[MAX_PATH] = {};
@@ -89,19 +99,37 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
     }
     CreateDirectoryA(model_dir.c_str(), nullptr);
 
-    // 简单窗口：进度条 + 状态 + 完成按钮
+    // 窗口：选择模型大小 + 进度
     const wchar_t* cls = L"LiveSubModelDl";
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);
     wc.hInstance = hInst;
     wc.lpfnWndProc = [](HWND h, UINT m, WPARAM wp, LPARAM lp) -> LRESULT {
-        if (m == WM_COMMAND && LOWORD(wp) == 1) { // 完成/取消
-            if (IsWindowEnabled(GetDlgItem(h, 1))) {
-                PostQuitMessage(0);
-            } else {
-                g_cancel = true;
-                SetWindowTextW(h, L"正在取消...");
+        if (m == WM_COMMAND) {
+            const int id = LOWORD(wp);
+            if (id == 1) { // 开始下载
+                EnableWindow(GetDlgItem(h, 1), FALSE);
+                EnableWindow(GetDlgItem(h, 2), FALSE);
+                EnableWindow(GetDlgItem(h, 3), FALSE);
+                g_use_large = (SendMessageW(GetDlgItem(h, 2), BM_GETCHECK, 0, 0) == BST_CHECKED);
+                std::string dir;
+                {
+                    wchar_t buf[MAX_PATH] = {};
+                    GetModuleFileNameW(nullptr, buf, MAX_PATH);
+                    std::wstring w(buf);
+                    size_t p = w.find_last_of(L"\\/");
+                    w.resize(p);
+                    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
+                    dir.assign((size_t)n - 1, '\0');
+                    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, dir.data(), n, nullptr, nullptr);
+                    dir += "\\model";
+                }
+                const ModelChoice& mc = g_use_large ? kLarge : kSmall;
+                const std::string repo = g_use_large ? kRepo : kRepoSm;
+                std::thread(download_worker, dir, mc, repo).detach();
+                return 0;
             }
+            if (id == 4) { PostQuitMessage(0); return 0; }
             return 0;
         }
         if (m == WM_CLOSE) { g_cancel = true; DestroyWindow(h); return 0; }
@@ -113,23 +141,33 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
 
     HWND hwnd = CreateWindowExW(0, cls, L"LiveSub 模型下载",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
-        CW_USEDEFAULT, CW_USEDEFAULT, 460, 150, nullptr, nullptr, hInst, nullptr);
+        CW_USEDEFAULT, CW_USEDEFAULT, 520, 220, nullptr, nullptr, hInst, nullptr);
+    CreateWindowExW(0, L"STATIC", L"选择要下载的模型大小：",
+        WS_CHILD | WS_VISIBLE, 20, 12, 460, 20, hwnd, nullptr, hInst, nullptr);
+    HWND r_big = CreateWindowExW(0, L"BUTTON", L"大模型（1.7B）：更准确，要求更高性能，约 2.8GB（推荐）",
+        WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | BS_LEFT,
+        20, 36, 470, 22, hwnd, (HMENU)2, hInst, nullptr);
+    CreateWindowExW(0, L"BUTTON", L"小模型（0.6B）：速度快、性能要求低，约 1.1GB",
+        WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | BS_LEFT,
+        20, 60, 470, 22, hwnd, (HMENU)3, hInst, nullptr);
+    SendMessageW(r_big, BM_SETCHECK, BST_CHECKED, 0);
+
     g_progress = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE,
-                                 20, 30, 420, 24, hwnd, nullptr, hInst, nullptr);
+                                 20, 92, 470, 24, hwnd, nullptr, hInst, nullptr);
     SendMessageW(g_progress, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
-    g_status = CreateWindowExW(0, L"STATIC", L"准备下载...", WS_CHILD | WS_VISIBLE,
-                               20, 60, 420, 20, hwnd, nullptr, hInst, nullptr);
-    g_done = CreateWindowExW(0, L"BUTTON", L"完成", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED,
-                             340, 90, 100, 26, hwnd, (HMENU)1, hInst, nullptr);
+    g_status = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE,
+                               20, 122, 470, 20, hwnd, nullptr, hInst, nullptr);
+    CreateWindowExW(0, L"BUTTON", L"开始下载", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                    320, 152, 90, 26, hwnd, (HMENU)1, hInst, nullptr);
+    g_done = CreateWindowExW(0, L"BUTTON", L"关闭", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                             420, 152, 70, 26, hwnd, (HMENU)4, hInst, nullptr);
     ShowWindow(hwnd, SW_SHOW);
 
-    std::thread worker(download_worker, model_dir);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
     g_cancel = true;
-    worker.join();
     return 0;
 }
