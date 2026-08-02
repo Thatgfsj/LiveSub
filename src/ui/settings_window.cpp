@@ -303,6 +303,7 @@ LRESULT CALLBACK SettingsWindow::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
             return 0;
         }
         case WM_NOTIFY: {
+            if (!self) return 0;
             NMHDR* h = (NMHDR*)lp;
             if (h && h->code == TCN_SELCHANGE && h->idFrom == IDC_TAB) {
                 const int sel = (int)SendMessageW(h->hwndFrom, TCM_GETCURSEL, 0, 0);

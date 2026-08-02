@@ -43,6 +43,10 @@ struct AsrPipeline {
     std::atomic<bool> finalize_pending{false};
     std::atomic<size_t> seg_start{0};
     std::atomic<size_t> seg_end{0};
+    // 定稿段边界快照：speech_end 时记录，避免新段 speech_start 覆盖 seg_start
+    // 导致 finalize 取段失败（定稿/语音输入丢失）
+    std::atomic<size_t> finalize_seg_start{0};
+    std::atomic<size_t> finalize_seg_end{0};
     std::atomic<size_t> last_processed{0};
 
     // 识别与显示
@@ -106,6 +110,12 @@ private:
     // 共享单引擎（显存一份），ASR 线程串行使用
     AsrEngine asr_;
     std::mutex asr_mtx_;
+
+    // 管线启停与 ASR 线程互斥：
+    // stop_pipeline/start_pipeline 会 delete queue/vad/resampler，
+    // 若 ASR 线程正 process_pipeline 使用它们 → use-after-free 崩溃。
+    // 锁顺序：pipeline_mtx_ → asr_mtx_（无反向，不会死锁）
+    std::mutex pipeline_mtx_;
 
     std::thread asr_thread_;
     std::atomic<bool> asr_running_{false};

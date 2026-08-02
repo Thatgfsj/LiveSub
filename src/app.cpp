@@ -69,6 +69,7 @@ bool App::ensure_window() {
 }
 
 bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
+    std::lock_guard<std::mutex> plk(pipeline_mtx_);
     if (p.enabled.load()) return true;
 
     // 共享窗口：只创建一次，两条管线共用
@@ -89,13 +90,20 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
         p.speaking = true;
         if (p.queue) p.seg_start = p.queue->total_samples();
         // "识别中…"只归麦克风轨（PC 轨字幕直接上屏，不占用主轨状态位）
-        if (&p == &mic_) p.window->set_status("识别中…");
+        // 注意：回调运行在采集线程，p.window 可能已被 stop_pipeline 置空 → 必须判空
+        if (p.window && &p == &mic_) p.window->set_status("识别中…");
     };
     p.vad->on_speech_end = [this, &p](int64_t) {
         p.speaking = false;
-        if (p.queue) p.seg_end = p.queue->total_samples();
+        if (p.queue) {
+            p.seg_end = p.queue->total_samples();
+            // 快照段边界：避免新段 speech_start 覆盖 seg_start，
+            // 导致 finalize 取段失败（定稿/语音输入丢失）
+            p.finalize_seg_start = p.seg_start.load();
+            p.finalize_seg_end   = p.seg_end.load();
+        }
         p.finalize_pending = true;
-        if (&p == &mic_) p.window->set_status("");
+        if (p.window && &p == &mic_) p.window->set_status("");
     };
     p.resample_buf.resize((size_t)asr_.sample_rate() * 2);
     p.win_buf.reserve((size_t)asr_.sample_rate() * 32);
@@ -134,10 +142,12 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
 }
 
 void App::stop_pipeline(AsrPipeline& p) {
+    std::lock_guard<std::mutex> plk(pipeline_mtx_);
     p.enabled = false;
-    p.window = nullptr;
     if (p.queue) p.queue->stop();
-    p.capture.stop();
+    p.capture.stop(); // 先停采集线程（VAD 回调随之停止）
+    // 采集线程已停（capture.stop 内部 join），此时置空 window 指针安全
+    p.window = nullptr;
     if (p.vad) { delete p.vad; p.vad = nullptr; }
     if (p.queue) { delete p.queue; p.queue = nullptr; }
     if (p.resampler) { delete p.resampler; p.resampler = nullptr; }
@@ -299,6 +309,8 @@ void App::on_audio(AsrPipeline& p, const float* pcm, size_t n, int64_t t_ms) {
 // ASR 线程：单引擎串行处理两条管线
 // ---------------------------------------------------------------------------
 bool App::process_pipeline(AsrPipeline& p) {
+    // 与 stop_pipeline/start_pipeline 互斥：防止 ASR 线程使用 queue/vad 时被并发 delete
+    std::lock_guard<std::mutex> plk(pipeline_mtx_);
     const int64_t t_now = now_ms();
     const bool finalize = p.finalize_pending.exchange(false);
     if (!p.enabled.load() || !p.queue) {
@@ -320,15 +332,16 @@ bool App::process_pipeline(AsrPipeline& p) {
     p.last_processed = total_now;
 
     // 新段首窗最短 1.5s
-    const size_t seg_now = p.seg_start.load();
-    if (!finalize && total_now - seg_now < (size_t)asr_.sample_rate() * 3 / 2) {
+    if (!finalize && total_now - p.seg_start.load() < (size_t)asr_.sample_rate() * 3 / 2) {
         last_asr_heartbeat_ms_ = t_now;
         return false;
     }
 
-    // 取窗口（finalize 用固定段尾，上限 30s；部分结果 8s）
-    const size_t seg_end = finalize ? p.seg_end.load() : 0;
-    const size_t max_len = (size_t)asr_.sample_rate() * (finalize ? 30 : 8);
+    // 取窗口：finalize 用段边界快照（不被新段覆盖）；
+    // 窗口上限统一 8s——定稿与最后一次 interim 用同一窗口 → 文本无缝不蹦字
+    const size_t seg_now = finalize ? p.finalize_seg_start.load() : p.seg_start.load();
+    const size_t seg_end = finalize ? p.finalize_seg_end.load() : 0;
+    const size_t max_len = (size_t)asr_.sample_rate() * 8;
     const size_t n = p.queue->take_segment(seg_now, seg_end, max_len, p.win_buf);
     if (n == 0) return false;
 
@@ -389,7 +402,7 @@ bool App::process_pipeline(AsrPipeline& p) {
                 }
             }
         } else if (finalize) {
-            if (&p == &mic_) p.window->set_status("未识别到语音");
+            // 定稿但无文本（噪音/气声）：不弹状态文字（避免屏幕蹦字），仅记日志
         }
         if (cfg_.log_level >= 1) {
             logf("[%s] %s | total=%lldms%s\n", p.name.c_str(),

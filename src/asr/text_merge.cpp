@@ -116,7 +116,9 @@ std::string TextMerger::update(const std::string& new_text, bool finalize, int64
             }
         }
         current_.clear();
-        return nt;
+        // 返回 current() 而非 nt：定稿后显示"上一句 + 定稿句"两行，
+        // 与 interim 期间的行结构一致 → 定稿瞬间不会丢行/蹦字
+        return current();
     }
 
     // 部分结果：幻觉输出不进入字幕
@@ -141,15 +143,18 @@ std::string TextMerger::update(const std::string& new_text, bool finalize, int64
     if (prev_result_.empty()) {
         confirmed_ = nt;      // 首个结果整体视为已确认
     } else {
+        // 去标点公共前缀：判断两次结果是否同一句（标点差异不影响）
         const size_t cp = common_prefix_len(strip_punct(prev_result_), strip_punct(nt));
         if (cp == 0) {
             confirmed_ = nt;  // 完全不同 → 新句开始：确认重置
             prev_interim_.clear();
-        } else if (cp > strip_punct(confirmed_).size()) {
-            // 公共前缀更长 → 确认部分增长（字节级公共前缀）
-            confirmed_ = nt.substr(0, common_prefix_len(prev_result_, nt));
+        } else {
+            // 同一句：确认部分按字节级公共前缀只增不减（不回退）
+            const size_t byte_cp = common_prefix_len(prev_result_, nt);
+            if (byte_cp > confirmed_.size()) {
+                confirmed_ = nt.substr(0, byte_cp);
+            }
         }
-        // 公共前缀变短（识别回退）→ confirmed_ 保持（不回退）
     }
     prev_result_ = nt;
     // 显示 = confirmed（已确认，稳定不回退）+ interim（未确认尾部）

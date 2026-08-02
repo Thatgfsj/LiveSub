@@ -294,8 +294,8 @@ void SubtitleWindow::set_text(const std::string& text, size_t confirmed_offset) 
     {
         std::lock_guard<std::mutex> lk(mtx_);
         content_ = to_wide(text);
+        confirmed_offset_ = confirmed_offset; // 与 content_ 同锁，避免与渲染线程竞争
     }
-    confirmed_offset_ = confirmed_offset;
     layout_dirty_ = true;
 }
 
@@ -303,8 +303,8 @@ void SubtitleWindow::set_second_text(const std::string& text, size_t confirmed_o
     {
         std::lock_guard<std::mutex> lk(mtx_);
         second_text_ = to_wide(text);
+        second_confirmed_ = confirmed_offset;
     }
-    second_confirmed_ = confirmed_offset;
     layout_dirty_ = true;
 }
 
