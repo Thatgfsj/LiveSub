@@ -114,16 +114,20 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
     vp.min_speech_ms = cfg_.min_speech_ms;
     vp.silence_ms    = cfg_.silence_ms;
     p.vad = new Vad(vp);
-    p.vad->on_speech_start = [this, &p](int64_t) {
+    p.vad->on_speech_start = [this, &p](int64_t start_ms) {
         p.speaking = true;
-        if (p.queue) p.seg_start = p.queue->total_samples();
+        // 段起点用 VAD 报告的语音真实起点（毫秒→样本序号），
+        // 不能用回调时刻的 total_samples——那会晚约 min_speech_ms(250ms)，
+        // 把开头的 1-2 个字切掉（"第一个字识别不到"）
+        if (p.queue) p.seg_start = (size_t)(start_ms * asr_.sample_rate() / 1000);
         // 不再显示"识别中…"：频繁说话时它会反复闪现（蹦迪感），
         // 字幕本身 1 秒内就会上屏，无需状态文字
     };
-    p.vad->on_speech_end = [this, &p](int64_t) {
+    p.vad->on_speech_end = [this, &p](int64_t end_ms) {
         p.speaking = false;
         if (p.queue) {
-            p.seg_end = p.queue->total_samples();
+            // 段尾同样用 VAD 报告的时间（语音结束+静音），与队列累计基准一致
+            p.seg_end = (size_t)(end_ms * asr_.sample_rate() / 1000);
             // 快照段边界：避免新段 speech_start 覆盖 seg_start，
             // 导致 finalize 取段失败（定稿/语音输入丢失）
             p.finalize_seg_start = p.seg_start.load();
