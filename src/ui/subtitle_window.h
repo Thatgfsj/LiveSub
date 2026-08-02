@@ -77,10 +77,14 @@ private:
     std::atomic<bool> layout_dirty_{true};
     float last_layout_size_ = 0.0f; // 上次布局字号（平滑用，避免缩放跳变）
     size_t confirmed_offset_ = std::string::npos; // 已确认偏移（interim 样式）
+    // 滚动粘滞：已滚掉的前缀（滚上去的文本不再回来；
+    // 新文本以该前缀开头 → 继续从滚动位置显示；前缀变化（新句）→ 重置）
+    size_t scroll_skip_ = 0;
+    std::wstring scroll_prefix_;
     // 文本实际包围区域（布局重建时更新；背景只画这里，不铺满整个窗口）
     float bg1_left_ = 0, bg1_top_ = 0, bg1_right_ = 0, bg1_bot_ = 0;
     void rebuild_layout(const std::wstring& text, float w, float h);
-    void apply_interim_style(IDWriteTextLayout* l, const std::wstring& t);
+    void apply_interim_style(IDWriteTextLayout* l, const std::wstring& t, size_t base_offset = 0);
     void draw_layout(IDWriteTextLayout* l, float x, float y, bool stroke);
 
     // 分层窗口资源

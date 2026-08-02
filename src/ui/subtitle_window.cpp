@@ -300,13 +300,30 @@ void SubtitleWindow::set_status(const std::string& status) {
 }
 
 // 构建文本布局：
-//   1. 行数超过 max_lines（默认 2）时逐级缩小字号（最多 50%），让内容两行放下
-//      （TextMerger 已限制为最近 N 句，因此短句两行不会误缩）
-//   2. 缩到最小仍超行（极端长文本）→ 滚动保留最后 max_lines 行（兜底）
+//   1. 行数超过 max_lines 时逐级缩小字号，直到最小字号（配置）
+//   2. 缩到最小仍超行 → 滚动保留最后 max_lines 行（去掉最上面一行）
+//   3. 滚动粘滞：已滚掉的前缀被记住，后续更新若仍以该前缀开头，
+//      继续从滚动位置显示（识别重排导致文本变短时，滚上去的行不会回来）
 void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) {
     if (layout_) { layout_->Release(); layout_ = nullptr; }
     bg1_left_ = bg1_top_ = bg1_right_ = bg1_bot_ = 0; // 无文本 → 无背景
-    if (!dwrite_factory_ || !text_format_ || text.empty()) return;
+    if (!dwrite_factory_ || !text_format_ || text.empty()) {
+        scroll_skip_ = 0;
+        scroll_prefix_.clear();
+        return;
+    }
+
+    // 滚动粘滞：新文本以已滚掉的前缀开头 → 从滚动位置继续（滚掉的行不回来）
+    std::wstring effective = text;
+    size_t base_skip = 0;
+    if (scroll_skip_ > 0 && text.size() >= scroll_skip_ &&
+        text.compare(0, scroll_skip_, scroll_prefix_) == 0) {
+        base_skip = scroll_skip_;
+        effective = text.substr(scroll_skip_);
+    } else {
+        scroll_skip_ = 0; // 前缀变化（新句/内容重置）→ 从头显示
+        scroll_prefix_.clear();
+    }
 
     auto make = [&](const std::wstring& t) -> IDWriteTextLayout* {
         IDWriteTextLayout* l = nullptr;
@@ -330,14 +347,14 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
     const UINT32 max = (UINT32)std::max(1, style_.max_lines);
     const float min_size = std::max(8.0f, style_.min_font_size); // 最小字号（配置）
 
-    IDWriteTextLayout* l = make(text);
+    IDWriteTextLayout* l = make(effective);
     if (!l) return;
 
-    // 1. 字号自适应：超行逐级缩小，直到两行放下或最小字号
+    // 1. 字号自适应：超行逐级缩小，直到放得下或最小字号
     float size = style_.font_size;
     UINT32 lines = 0;
     for (int attempt = 0; attempt < 14; attempt++) {
-        DWRITE_TEXT_RANGE range = {0, (UINT32)text.size()};
+        DWRITE_TEXT_RANGE range = {0, (UINT32)effective.size()};
         l->SetFontSize(size, range);
         lines = 0;
         l->GetLineMetrics(nullptr, 0, &lines);
@@ -345,32 +362,36 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
         size *= 0.92f;
     }
     if (lines <= max) {
-        apply_interim_style(l, text);
+        apply_interim_style(l, effective, base_skip);
         record_bg(l);
         layout_ = l;
-        return;
+        return; // 滚动状态保留（粘滞：即使本次不超行也不回退）
     }
 
-    // 2. 最小字号仍超行 → 滚动保留最后 max 行（兜底，极端长文本）
+    // 2. 最小字号仍超行 → 滚动保留最后 max 行（去掉最上面几行）
     std::vector<DWRITE_LINE_METRICS> metrics(lines);
     l->GetLineMetrics(metrics.data(), lines, &lines);
     UINT32 skip_chars = 0;
     for (UINT32 i = 0; i < lines - max; i++) {
         skip_chars += metrics[i].length;
     }
-    while (skip_chars > 0 && skip_chars < text.size() &&
-           (text[skip_chars] & 0xFC00) == 0xDC00) {
+    while (skip_chars > 0 && skip_chars < effective.size() &&
+           (effective[skip_chars] & 0xFC00) == 0xDC00) {
         skip_chars--;
     }
     l->Release();
-    l = make(text.substr(skip_chars));
+    l = make(effective.substr(skip_chars));
     if (l) {
-        DWRITE_TEXT_RANGE range = {0, (UINT32)text.size() - skip_chars};
+        DWRITE_TEXT_RANGE range = {0, (UINT32)effective.size() - skip_chars};
         l->SetFontSize(size, range);
-        apply_interim_style(l, text.substr(skip_chars));
+        apply_interim_style(l, effective.substr(skip_chars), base_skip + skip_chars);
     }
     record_bg(l);
     layout_ = l;
+    // 更新滚动状态（记住被滚掉的总前缀）
+    const size_t total_skip = base_skip + skip_chars;
+    scroll_skip_ = total_skip;
+    scroll_prefix_ = text.substr(0, total_skip);
 }
 
 // 绘制 layout（描边 + 填充），(x, y) 为区域左上角
@@ -391,11 +412,13 @@ void SubtitleWindow::draw_layout(IDWriteTextLayout* l, float x, float y, bool st
 }
 
 // interim（未确认尾部）半透明样式：confirmed 偏移之后的部分
-void SubtitleWindow::apply_interim_style(IDWriteTextLayout* l, const std::wstring& t) {
+// base_offset：滚动后显示文本相对原始文本的偏移（confirmed_offset 需换算）
+void SubtitleWindow::apply_interim_style(IDWriteTextLayout* l, const std::wstring& t,
+                                         size_t base_offset) {
     if (!l || !interim_brush_ || confirmed_offset_ == std::string::npos) return;
-    if (confirmed_offset_ < t.size()) {
-        DWRITE_TEXT_RANGE range = {(UINT32)confirmed_offset_,
-                                   (UINT32)(t.size() - confirmed_offset_)};
+    if (confirmed_offset_ > base_offset && confirmed_offset_ - base_offset < t.size()) {
+        DWRITE_TEXT_RANGE range = {(UINT32)(confirmed_offset_ - base_offset),
+                                   (UINT32)(t.size() - (confirmed_offset_ - base_offset))};
         l->SetDrawingEffect(interim_brush_, range);
     }
 }
