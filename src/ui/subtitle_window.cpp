@@ -161,12 +161,13 @@ void SubtitleWindow::apply_style() {
                              (style_.font_color & 0xFF) / 255.0f,
                              (style_.font_color >> 24 & 0xFF) / 255.0f),
                 &text_brush_);
-            // interim（未确认尾部）：文字色 45% 不透明
+            // interim（未确认尾部）：文字色 70% 不透明
+            // （45% 时新识别的字在背景上发虚/模糊；70% 仍保留"未确认"的视觉区分）
             target_->CreateSolidColorBrush(
                 D2D1::ColorF((style_.font_color >> 16 & 0xFF) / 255.0f,
                              (style_.font_color >> 8 & 0xFF) / 255.0f,
                              (style_.font_color & 0xFF) / 255.0f,
-                             ((style_.font_color >> 24 & 0xFF) / 255.0f) * 0.45f),
+                             ((style_.font_color >> 24 & 0xFF) / 255.0f) * 0.70f),
                 &interim_brush_);
             // 描边色（艺术字效果，默认黑）
             target_->CreateSolidColorBrush(
