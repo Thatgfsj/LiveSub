@@ -198,11 +198,7 @@ Config Config::load(const std::string& path) {
     c.text_path          = get_str(kv, "output.text_path", c.text_path);
 
     c.mic_enabled        = get_bool(kv, "tracks.mic_enabled", c.mic_enabled);
-    c.mic_pos_x          = get_int(kv, "tracks.mic_pos_x", c.mic_pos_x);
-    c.mic_pos_y          = get_int(kv, "tracks.mic_pos_y", c.mic_pos_y);
     c.pc_enabled         = get_bool(kv, "tracks.pc_enabled", c.pc_enabled);
-    c.pc_pos_x           = get_int(kv, "tracks.pc_pos_x", c.pc_pos_x);
-    c.pc_pos_y           = get_int(kv, "tracks.pc_pos_y", c.pc_pos_y);
 
     c.log_level          = get_int(kv, "log.log_level", c.log_level);
 
@@ -278,11 +274,7 @@ void Config::save(const std::string& path) const {
     w("");
     w("[tracks]");
     w("mic_enabled = " + std::string(mic_enabled ? "true" : "false"));
-    w("mic_pos_x = " + std::to_string(mic_pos_x));
-    w("mic_pos_y = " + std::to_string(mic_pos_y));
     w("pc_enabled = " + std::string(pc_enabled ? "true" : "false"));
-    w("pc_pos_x = " + std::to_string(pc_pos_x));
-    w("pc_pos_y = " + std::to_string(pc_pos_y));
     w("");
     w("[log]");
     w("log_level = " + std::to_string(log_level));

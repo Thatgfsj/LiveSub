@@ -209,15 +209,6 @@ std::string TextMerger::current() const {
     return s;
 }
 
-std::vector<std::string> TextMerger::history(int keep) const {
-    std::vector<std::string> out;
-    const size_t from = (sentences_.size() > (size_t)keep) ? sentences_.size() - keep : 0;
-    for (size_t i = sentences_.size(); i-- > from;) {
-        out.push_back(sentences_[i].text);
-    }
-    return out;
-}
-
 void TextMerger::clear() {
     sentences_.clear();
     current_.clear();

@@ -114,7 +114,6 @@ bool SubtitleWindow::create(const Style& s, std::wstring* err) {
 
 void SubtitleWindow::release_d2d() {
     if (layout_)         { layout_->Release();         layout_         = nullptr; }
-    if (layout2_)        { layout2_->Release();        layout2_        = nullptr; }
     if (text_format_)    { text_format_->Release();    text_format_    = nullptr; }
     if (text_brush_)     { text_brush_->Release();     text_brush_     = nullptr; }
     if (interim_brush_)  { interim_brush_->Release();  interim_brush_  = nullptr; }
@@ -226,16 +225,9 @@ void SubtitleWindow::render() {
         }
     }
 
-    // 3. 布局（文本变化时重建；主轨上半区 + 第二轨下半区）
+    // 3. 布局（文本变化时重建）
     if (layout_dirty_.exchange(false)) {
-        std::wstring second;
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            second = second_text_;
-        }
-        const float half_h = (float)dib_h_ * 0.5f;
-        rebuild_layout(full, (float)dib_w_, half_h);
-        rebuild_layout2(second, (float)dib_w_, half_h);
+        rebuild_layout(full, (float)dib_w_, (float)dib_h_);
     }
 
     // 4. D2D 画到内存 DIB
@@ -257,11 +249,9 @@ void SubtitleWindow::render() {
                     bg_brush_);
             };
             fill_bg(bg1_left_, bg1_top_, bg1_right_, bg1_bot_);
-            fill_bg(bg2_left_, (float)dib_h_ * 0.5f + bg2_top_,
-                    bg2_right_, (float)dib_h_ * 0.5f + bg2_bot_);
-            // 布局失败兜底：整半区文本（仅非常规路径）
+            // 布局失败兜底：整窗文本（仅非常规路径）
             if (bg1_bot_ <= bg1_top_ && !full.empty() && text_format_) {
-                fill_bg(0, 0, (float)dib_w_, (float)dib_h_ * 0.5f);
+                fill_bg(0, 0, (float)dib_w_, (float)dib_h_);
             }
         }
 
@@ -269,13 +259,9 @@ void SubtitleWindow::render() {
             draw_layout(layout_, 0.0f, 0.0f, true);
         } else if (!full.empty() && text_format_) {
             const float pad = style_.font_size * 0.4f;
-            D2D1_RECT_F trc = D2D1::RectF(pad, pad, (float)dib_w_ - pad, (float)dib_h_ * 0.5f - pad);
+            D2D1_RECT_F trc = D2D1::RectF(pad, pad, (float)dib_w_ - pad, (float)dib_h_ - pad);
             target_->DrawTextW(full.c_str(), (UINT32)full.size(), text_format_, trc,
                                text_brush_, D2D1_DRAW_TEXT_OPTIONS_CLIP);
-        }
-        // 第二轨（下半区）
-        if (layout2_) {
-            draw_layout(layout2_, 0.0f, (float)dib_h_ * 0.5f, true);
         }
         if (FAILED(target_->EndDraw())) return;
     }
@@ -295,15 +281,6 @@ void SubtitleWindow::set_text(const std::string& text, size_t confirmed_offset) 
         std::lock_guard<std::mutex> lk(mtx_);
         content_ = to_wide(text);
         confirmed_offset_ = confirmed_offset; // 与 content_ 同锁，避免与渲染线程竞争
-    }
-    layout_dirty_ = true;
-}
-
-void SubtitleWindow::set_second_text(const std::string& text, size_t confirmed_offset) {
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        second_text_ = to_wide(text);
-        second_confirmed_ = confirmed_offset;
     }
     layout_dirty_ = true;
 }
@@ -417,56 +394,6 @@ void SubtitleWindow::apply_interim_style(IDWriteTextLayout* l, const std::wstrin
     }
 }
 
-// 第二轨布局（与主轨同逻辑：长句缩字号 + interim 样式）
-void SubtitleWindow::rebuild_layout2(const std::wstring& text, float w, float h) {
-    if (layout2_) { layout2_->Release(); layout2_ = nullptr; }
-    bg2_left_ = bg2_top_ = bg2_right_ = bg2_bot_ = 0; // 无文本 → 无背景
-    if (!dwrite_factory_ || !text_format_ || text.empty()) return;
-
-    auto make = [&](const std::wstring& t) -> IDWriteTextLayout* {
-        IDWriteTextLayout* l = nullptr;
-        if (FAILED(dwrite_factory_->CreateTextLayout(t.c_str(), (UINT32)t.size(),
-                                                     text_format_, w, h, &l))) {
-            return nullptr;
-        }
-        return l;
-    };
-    // 记录第二轨文本实际包围盒
-    auto record_bg = [&](IDWriteTextLayout* l) {
-        DWRITE_TEXT_METRICS m;
-        if (l && SUCCEEDED(l->GetMetrics(&m))) {
-            bg2_left_ = m.left;
-            bg2_top_  = m.top;
-            bg2_right_ = m.left + m.width;
-            bg2_bot_  = m.top + m.height;
-        }
-    };
-
-    const UINT32 max = (UINT32)std::max(1, style_.max_lines);
-    const float min_size = style_.font_size * 0.5f;
-
-    IDWriteTextLayout* l = make(text);
-    if (!l) return;
-
-    float size = style_.font_size;
-    for (int attempt = 0; attempt < 14; attempt++) {
-        DWRITE_TEXT_RANGE range = {0, (UINT32)text.size()};
-        l->SetFontSize(size, range);
-        UINT32 lines = 0;
-        l->GetLineMetrics(nullptr, 0, &lines);
-        if (lines <= max || size <= min_size) break;
-        size *= 0.92f;
-    }
-    if (interim_brush_ && second_confirmed_ != std::string::npos &&
-        second_confirmed_ < text.size()) {
-        DWRITE_TEXT_RANGE range = {(UINT32)second_confirmed_,
-                                   (UINT32)(text.size() - second_confirmed_)};
-        l->SetDrawingEffect(interim_brush_, range);
-    }
-    record_bg(l);
-    layout2_ = l;
-}
-
 std::wstring SubtitleWindow::to_wide(const std::string& s) const {
     if (s.empty()) return L"";
     const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
@@ -484,7 +411,6 @@ void SubtitleWindow::destroy() {
         std::lock_guard<std::mutex> lk(mtx_);
         content_.clear();
         status_.clear();
-        second_text_.clear();
     }
     release_d2d();
     if (dib_) { DeleteObject(dib_); dib_ = nullptr; }

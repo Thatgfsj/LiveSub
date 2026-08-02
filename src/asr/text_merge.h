@@ -38,7 +38,6 @@ public:
     std::vector<std::string> history(int keep = 2) const;
 
     void clear();
-    void set_max_history(int n) { max_history_ = n; }
     // 字幕最多显示几行（历史句 + 当前句），超出只保留最近 N 行
     void set_max_lines(int n) { max_lines_ = std::max(1, n); }
 

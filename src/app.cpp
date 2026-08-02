@@ -32,8 +32,8 @@ void App::update_tray(TrayIcon::State s, const std::string& tip) {
 // ---------------------------------------------------------------------------
 // 管线启停
 // ---------------------------------------------------------------------------
-// 唯一共享字幕窗口（两条管线共用一个展示框：mic 主轨上半区 / pc 第二轨下半区）。
-// 位置按 ui.pos_x/pos_y 百分比，并 clamp 到屏幕内（保证第二轨字幕完整可见）。
+// 唯一共享字幕窗口（两条管线共用同一展示框，整窗显示当前识别的字幕）。
+// 位置按 ui.pos_x/pos_y 像素中心，并 clamp 到屏幕内（字幕完整可见）。
 bool App::ensure_window() {
     if (window_.ok()) return true;
 
@@ -160,7 +160,6 @@ void App::stop_pipeline(AsrPipeline& p) {
     // 两条管线都停 → 清空共享窗口内容（窗口保留，内容空了会淡出）
     if (!mic_.enabled.load() && !pc_.enabled.load()) {
         window_.set_text("");
-        window_.set_second_text("");
         window_.set_status("");
     }
     logf("[%s] 字幕已关闭\n", p.name.c_str());
@@ -390,7 +389,6 @@ bool App::process_pipeline(AsrPipeline& p) {
         const std::string full = p.merger.update(r.text, finalize, now_ms());
         if (!r.text.empty()) {
             // 单一展示框整窗显示：哪条管线在识别就显示谁的字幕
-            // （不分割上下半区——两条字幕一般不会同时开）
             p.window->set_text(full, p.merger.confirmed_offset());
             // 输出：interim 更新文本文件（OBS 轮询实时字幕），定稿句写入/追加
             p.output.update(full, finalize ? r.text : std::string());

@@ -56,11 +56,7 @@ struct Config {
 
     // [tracks]
     bool mic_enabled        = true;    // 麦克风字幕（默认开）
-    int  mic_pos_x          = 50;      // 麦克风字幕位置（屏幕百分比）
-    int  mic_pos_y          = 85;
     bool pc_enabled         = false;   // 电脑字幕（默认关：识别电脑播放的声音）
-    int  pc_pos_x           = 50;
-    int  pc_pos_y           = 45;
 
     // [log]
     int  log_level          = 1;       // 0=quiet 1=info 2=debug

@@ -66,20 +66,6 @@ bool AudioQueue::wait_for_window() {
     return running_;
 }
 
-size_t AudioQueue::take_window(std::vector<float>& window) {
-    std::lock_guard<std::mutex> lk(mtx_);
-    const size_t n = std::min(n_buffered_, chunk_);
-    window.resize(n);
-    // 窗口 = 缓冲中【最新】的 chunk_ 个样本（滑动窗口语义：
-    // 缓冲满后必须从缓冲末尾 head_ 往回取，否则会取到最早写入的陈旧数据）
-    const size_t start = (head_ + capacity_ - n) % capacity_;
-    for (size_t i = 0; i < n; i++) {
-        window[i] = buf_[(start + i) % capacity_];
-    }
-    last_take_total_ = total_;
-    return n;
-}
-
 size_t AudioQueue::take_segment(size_t start_total, size_t end_total, size_t max_len, std::vector<float>& out) {
     std::lock_guard<std::mutex> lk(mtx_);
     const size_t end = (end_total == 0) ? total_ : std::min(end_total, total_);

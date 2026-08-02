@@ -18,10 +18,6 @@ public:
     // 返回 true 且有数据；false 表示停止
     bool wait_for_window();
 
-    // 取出当前窗口（[now-chunk, now] 的滑动窗口；如果音频不足 chunk 则取全部）
-    // 返回窗口样本数；window 容量由调用方按 chunk_ms 预留
-    size_t take_window(std::vector<float>& window);
-
     // 取语音段窗口：[start_total, end_total) 的样本（最多 max_len 样本）。
     // end_total=0 表示取到当前。窗口起点对齐语音段起点（句子开头），
     // 从根本上避免窗口跨句混合内容。
