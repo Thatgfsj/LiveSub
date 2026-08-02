@@ -107,6 +107,12 @@ bool SubtitleWindow::create(const Style& s, std::wstring* err) {
     apply_style();
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
 
+    // 创建/重建后直接全不透明显示：
+    // 不从头淡入——半透明期间文字边缘发虚（"加载时模糊一下"），
+    // 只有内容从有到无时才淡出
+    alpha_ = 1.0f;
+    anim_has_content_ = true;
+
     const UINT interval = std::max(1, 1000 / std::max(1, style_.fps));
     timer_ = SetTimer(hwnd_, 1, interval, nullptr);
     return true;
