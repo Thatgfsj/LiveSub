@@ -4,6 +4,7 @@
 int main() {
     TextMerger m; m.set_max_lines(2);
     m.update("大家好", false, 1000);
+    // LocalAgreement-2：首窗不确认（conf=0，整体半透明），第二窗一致前缀才确认
     printf("[1] '%s' conf=%zu\n", m.current().c_str(), m.confirmed_chars());
     m.update("大家好，今天", false, 2000);
     printf("[2] '%s' conf=%zu\n", m.current().c_str(), m.confirmed_chars());

@@ -129,7 +129,11 @@ std::string TextMerger::update(const std::string& new_text, bool finalize, int64
     //   公共前缀就是两次转写都一致的部分 → 确认为稳定文本（永不回退）；
     //   尾部（interim）跟随最新结果更新，渲染层用半透明样式区分
     if (prev_result_.empty()) {
-        confirmed_ = nt;      // 首个结果整体视为已确认
+        // 首个结果不确认（LocalAgreement-2：两次一致才确认）：
+        // 首窗（约 1s 短音频）识别不稳定，若整体确认会污染前缀，
+        // 导致后续窗口内容重排时整句变化（蹦字）。首窗整体半透明，
+        // 第二次结果与它的一致前缀才被确认。
+        confirmed_.clear();
     } else {
         // 去标点公共前缀：判断两次结果是否同一句（标点差异不影响）
         const size_t cp = common_prefix_len(strip_punct(prev_result_), strip_punct(nt));
