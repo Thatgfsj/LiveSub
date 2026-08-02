@@ -88,14 +88,9 @@ size_t TextMerger::common_prefix_len(const std::string& a, const std::string& b)
     return n;
 }
 
-void TextMerger::prune(int64_t now_ms) {
-    // 历史句保留数 = max_lines_ - 当前句占位；超出时最旧句停留 1 秒后移除
-    const int keep = std::max(1, max_lines_ - (current_.empty() ? 0 : 1));
-    while ((int)sentences_.size() > keep) {
-        if (now_ms - sentences_.front().ts < 1000) break; // 最旧句未满 1 秒
-        sentences_.erase(sentences_.begin());
-    }
-    // 历史长度上限保护
+void TextMerger::prune(int64_t /*now_ms*/) {
+    // 只做内存上限保护：显示行数由 current() 恒定控制，
+    // 不在识别循环里移除历史句（避免历史行突然消失/跳动）
     if ((int)sentences_.size() > max_history_) {
         sentences_.erase(sentences_.begin(), sentences_.begin() + (sentences_.size() - max_history_));
     }
@@ -129,13 +124,6 @@ std::string TextMerger::update(const std::string& new_text, bool finalize, int64
     if (!sentences_.empty() && nt == sentences_.back().text) {
         return current();
     }
-    // 旧句尾巴兜底：新结果包含在最后定稿句中（子串）→ 丢弃
-    // （长语音段窗口滑动时可能识别出上一句尾部；子串检测不会误杀正常新句）
-    if (!nt.empty() && !sentences_.empty() &&
-        sentences_.back().text.find(nt) != std::string::npos) {
-        return current();
-    }
-
     // Local Agreement（whisper_streaming 算法）：
     //   取"上次结果"与"本次结果"的最长公共前缀（去标点比较），
     //   公共前缀就是两次转写都一致的部分 → 确认为稳定文本（永不回退）；
@@ -175,32 +163,15 @@ std::string TextMerger::update(const std::string& new_text, bool finalize, int64
 }
 
 std::string TextMerger::current() const {
-    // 每句一行：已定稿句子（上一句）与当前句分行显示——
-    // "上一句固定在第一行，当前句在第二行实时更新"
-    //
-    // 去重合并规则：
-    //   - 当前句是上一句的【扩展】（以上一句开头，更完整）→ 只显示当前句一行，
-    //     避免两行开头相同（如"大家好。"+"大家好，我们开始"）
-    //   - 否则两行显示（上一句 + 当前句）
-    if (!current_.empty() && !sentences_.empty()) {
-        // 去标点比较前缀（标点差异不影响扩展判断）
-        const std::string last_p = strip_punct(sentences_.back().text);
-        const std::string cur_p  = strip_punct(current_);
-        if (cur_p.size() > last_p.size() &&
-            cur_p.compare(0, last_p.size(), last_p) == 0) {
-            return current_;
-        }
-    }
-
-    // 只输出最近 max_lines_ 句（句子级滚动，完整句子不砍断）
+    // 恒定显示结构（无补丁逻辑）：
+    //   最近 (max_lines_-1) 句定稿 + 当前句（interim 打字机）
+    //   说话时 2 行（上一句 + 当前句），停顿时 1 行（上一句）——行结构稳定不跳变
+    const size_t keep = (size_t)std::max(1, max_lines_ - 1);
     std::string s;
-    const size_t keep_sent = std::max(0, max_lines_ - (current_.empty() ? 0 : 1));
-    if (keep_sent > 0 && !sentences_.empty()) {
-        const size_t from = (sentences_.size() > (size_t)keep_sent) ? sentences_.size() - keep_sent : 0;
-        for (size_t i = from; i < sentences_.size(); i++) {
-            if (!s.empty()) s += "\n";
-            s += sentences_[i].text;
-        }
+    const size_t from = sentences_.size() > keep ? sentences_.size() - keep : 0;
+    for (size_t i = from; i < sentences_.size(); i++) {
+        if (!s.empty()) s += "\n";
+        s += sentences_[i].text;
     }
     if (!current_.empty()) {
         if (!s.empty()) s += "\n";
