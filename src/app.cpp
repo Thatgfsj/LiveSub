@@ -333,8 +333,8 @@ bool App::process_pipeline(AsrPipeline& p) {
     }
     p.last_processed = total_now;
 
-    // 新段首窗最短 1.5s
-    if (!finalize && total_now - p.seg_start.load() < (size_t)asr_.sample_rate() * 3 / 2) {
+    // 新段首窗最短 1.0s（对齐 whisper_streaming 默认 min-chunk-size=1.0s）
+    if (!finalize && total_now - p.seg_start.load() < (size_t)asr_.sample_rate()) {
         last_asr_heartbeat_ms_ = t_now;
         return false;
     }
