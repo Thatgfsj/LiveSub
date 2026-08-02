@@ -1,6 +1,7 @@
 #include "settings_window.h"
 
 #include <commctrl.h>
+#include <shellapi.h>
 #include <cstdio>
 #include <algorithm>
 #include <utility>
@@ -21,7 +22,7 @@ enum {
 
     // 页2 识别
     IDC_VAD_THRESH = 1201, IDC_SILENCE, IDC_CHUNK, IDC_HOP,
-    IDC_MODEL_BIG, IDC_MODEL_SMALL, IDC_MODEL_INFO,
+    IDC_MODEL_BIG, IDC_MODEL_SMALL, IDC_MODEL_INFO, IDC_MODEL_DL,
 
     // 页3 音频
     IDC_DEVICE = 1301, IDC_REFRESH, IDC_MIC_TRACK, IDC_PC_TRACK,
@@ -247,21 +248,26 @@ void SettingsWindow::apply() {
 void SettingsWindow::show_page(int page) {
     const int pages[4][2] = {
         {IDC_FONT_SIZE, IDC_CLICK_THRU},
-        {IDC_VAD_THRESH, IDC_MODEL_INFO},
+        {IDC_VAD_THRESH, IDC_MODEL_DL},
         {IDC_DEVICE, IDC_PC_TRACK},
         {IDC_WRITE_NONE, IDC_WRITE_SRT},
     };
+    int id_vis = 0, id_hid = 0;
     for (int i = 0; i < 4; i++) {
         const bool vis = (i == page);
         for (int id = pages[i][0]; id <= pages[i][1]; id++) {
             HWND c = GetDlgItem(hwnd_, id);
-            if (c) ShowWindow(c, vis ? SW_SHOW : SW_HIDE);
+            if (c) { ShowWindow(c, vis ? SW_SHOW : SW_HIDE); vis ? id_vis++ : id_hid++; }
         }
     }
     // label/hint（无 ID）：按句柄容器同步显隐
+    int reg_vis = 0, reg_hid = 0;
     for (auto& [c, pg] : g_page_ctls) {
         ShowWindow(c, pg == page ? SW_SHOW : SW_HIDE);
+        (pg == page) ? reg_vis++ : reg_hid++;
     }
+    fprintf(stderr, "[settings] show_page(%d): id=%d/%d reg=%d/%d\n",
+            page, id_vis, id_hid, reg_vis, reg_hid);
 }
 
 // 窗口尺寸变化：内容布局保持不变，只拉宽 Tab、把底部按钮贴到窗口底部
@@ -299,12 +305,17 @@ LRESULT CALLBACK SettingsWindow::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
                 case IDC_REFRESH:
                     self->populate_devices();
                     return 0;
+                case IDC_MODEL_DL:
+                    // 打开模型下载器（模型管理：下载/补下缺失的模型）
+                    ShellExecuteW(nullptr, L"open", L"model-dl.exe", nullptr, nullptr, SW_SHOWNORMAL);
+                    return 0;
             }
             return 0;
         }
         case WM_NOTIFY: {
             if (!self) return 0;
             NMHDR* h = (NMHDR*)lp;
+            if (h) fprintf(stderr, "[settings] WM_NOTIFY code=%d id=%u\n", h->code, (unsigned)h->idFrom);
             if (h && h->code == TCN_SELCHANGE && h->idFrom == IDC_TAB) {
                 const int sel = (int)SendMessageW(h->hwndFrom, TCM_GETCURSEL, 0, 0);
                 if (self) self->show_page(sel);
@@ -458,6 +469,8 @@ void SettingsWindow::run() {
     add_hint(h, L"大≈2.8GB / 小≈1.1GB，保存后重启生效", c1e + EDIT_W() + S(8), row1(5));
     CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
                   c1, row1(6), W - PAD() * 2 - c1, S(44), h, (HMENU)(INT_PTR)IDC_MODEL_INFO, hinst, nullptr);
+    CreateWindowW(L"BUTTON", L"打开模型下载器", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                  c1, row1(7), S(160), S(26), h, (HMENU)(INT_PTR)IDC_MODEL_DL, hinst, nullptr);
 
     // ================= 页3 音频（单列） =================
     g_cur_page = 2;

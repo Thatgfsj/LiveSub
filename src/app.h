@@ -95,8 +95,9 @@ private:
     void stop_pipeline(AsrPipeline& p);
     // 唯一共享字幕窗口（麦克风主轨上半区 / 电脑声音第二轨下半区），惰性创建
     bool ensure_window();
-    // 模型文件检测：切换模型大小后对应文件缺失 → 提示并打开下载器
-    void check_model_files();
+    // 模型文件检测：切换模型大小后对应文件缺失 → 提示并打开下载器；
+    // 返回 true = 目标模型文件缺失（缺失时不再弹重启提示）
+    bool check_model_files();
 
     Config cfg_;
 
@@ -127,6 +128,9 @@ private:
 
     // 语音输入（开启后定稿句注入当前焦点窗口）
     VoiceInput voice_input_;
+
+    // 当前运行中的模型大小（init 时记录；设置切换后提示重启生效）
+    std::string running_model_size_;
 
     // 日志
     FILE* log_file_ = nullptr;

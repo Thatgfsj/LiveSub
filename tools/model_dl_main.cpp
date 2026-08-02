@@ -47,6 +47,7 @@ static const ModelChoice kSmall = {
 static HWND g_progress = nullptr, g_status = nullptr, g_done = nullptr;
 static std::atomic<bool> g_cancel{false};
 static std::atomic<bool> g_use_large{true};
+static bool g_auto_mode = false;  // --auto 命令行模式：大小以命令行参数为准，不读 UI
 
 static void set_status(const std::wstring& s) {
     if (g_status) SetWindowTextW(g_status, s.c_str());
@@ -64,6 +65,24 @@ static void download_worker(const std::string& model_dir, const ModelChoice& mc,
           (std::string(kBaseHf) + repo + mc.proj_name).c_str(), proj_path, mc.proj_size },
     };
     const wchar_t* names[] = { L"主模型", L"音频编码器" };
+
+    // 目标模型文件已存在且完整 → 直接提示，不重复下载
+    {
+        auto size_ok = [](const std::string& p, uint64_t expect) {
+            FILE* f = fopen(p.c_str(), "rb");
+            if (!f) return false;
+            _fseeki64(f, 0, SEEK_END);
+            const long long sz = _ftelli64(f);
+            fclose(f);
+            return sz >= (long long)expect;
+        };
+        if (size_ok(main_path, mc.main_size) && size_ok(proj_path, mc.proj_size)) {
+            set_status(L"模型文件已存在且完整，无需下载");
+            EnableWindow(g_done, TRUE);
+            SetFocus(g_done);
+            return;
+        }
+    }
 
     bool all_ok = true;
     std::string last_err;
@@ -126,7 +145,10 @@ static void begin_download(HWND hwnd) {
     EnableWindow(GetDlgItem(hwnd, 1), FALSE);
     EnableWindow(GetDlgItem(hwnd, 2), FALSE);
     EnableWindow(GetDlgItem(hwnd, 3), FALSE);
-    g_use_large = (SendMessageW(GetDlgItem(hwnd, 2), BM_GETCHECK, 0, 0) == BST_CHECKED);
+    // --auto 模式：以命令行指定的大小为准（--auto --small 不再被 UI 默认勾选覆盖）
+    if (!g_auto_mode) {
+        g_use_large = (SendMessageW(GetDlgItem(hwnd, 2), BM_GETCHECK, 0, 0) == BST_CHECKED);
+    }
     const ModelChoice& mc = g_use_large ? kLarge : kSmall;
     const std::string repo = g_use_large ? kRepo : kRepoSm;
     std::thread(download_worker, get_model_dir(), mc, repo).detach();
@@ -137,7 +159,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR lpCmdLine, int) {
     bool auto_start = false;
     {
         std::wstring cmd = lpCmdLine ? lpCmdLine : L"";
-        if (cmd.find(L"--auto") != std::wstring::npos) auto_start = true;
+        if (cmd.find(L"--auto") != std::wstring::npos) { auto_start = true; g_auto_mode = true; }
         if (cmd.find(L"--small") != std::wstring::npos) g_use_large = false;
         if (cmd.find(L"--large") != std::wstring::npos) g_use_large = true;
     }
@@ -174,10 +196,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR lpCmdLine, int) {
     HWND r_big = CreateWindowExW(0, L"BUTTON", L"大模型（1.7B）：更准确，要求更高性能，约 2.8GB（推荐）",
         WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | BS_LEFT,
         20, 36, 470, 22, hwnd, (HMENU)2, hInst, nullptr);
-    CreateWindowExW(0, L"BUTTON", L"小模型（0.6B）：速度快、性能要求低，约 1.1GB",
+    HWND r_small = CreateWindowExW(0, L"BUTTON", L"小模型（0.6B）：速度快、性能要求低，约 1.1GB",
         WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | BS_LEFT,
         20, 60, 470, 22, hwnd, (HMENU)3, hInst, nullptr);
-    SendMessageW(r_big, BM_SETCHECK, BST_CHECKED, 0);
+    // 按命令行选择勾选（--auto --small 时默认勾小模型，UI 与下载一致）
+    SendMessageW(g_use_large ? r_big : r_small, BM_SETCHECK, BST_CHECKED, 0);
 
     g_progress = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE,
                                  20, 92, 470, 24, hwnd, nullptr, hInst, nullptr);

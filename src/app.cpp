@@ -249,6 +249,7 @@ bool App::init(const std::string& config_path, bool enable_capture) {
 
     mic_.name = "麦克风";
     pc_.name = "电脑声音";
+    running_model_size_ = cfg_.model_size; // 记录当前运行模型
 
     // 模型引擎（共享单实例）
     AsrEngine::Params ap;
@@ -484,7 +485,29 @@ void App::apply_config() {
     cfg_.save(cfg_.path());
 
     // 模型切换检测：切换到没有对应模型文件的大小 → 提示并打开下载器
-    check_model_files();
+    // 缺失时跳过下面的重启提示（模型都没下载，重启没有意义）
+    const bool model_missing = check_model_files();
+
+    // 模型大小切换：需要重启才生效 → 提示，确认则自动重启，取消则不重启
+    if (cfg_.model_size != running_model_size_ && !model_missing) {
+        const wchar_t* which = (cfg_.model_size == "small") ? L"小模型（0.6B）" : L"大模型（1.7B）";
+        const std::wstring msg = std::wstring(L"模型已切换为") + which +
+            L"，重启应用后生效。\n\n是否立即重启？";
+        const int ret = MessageBoxW(nullptr, msg.c_str(), L"LiveSub 模型切换",
+                                    MB_YESNO | MB_ICONQUESTION);
+        if (ret == IDYES) {
+            // 自动重启：先启动新实例，再退出当前进程
+            wchar_t exe[MAX_PATH] = {};
+            GetModuleFileNameW(nullptr, exe, MAX_PATH);
+            wchar_t dir[MAX_PATH] = {};
+            wcsncpy(dir, exe, MAX_PATH);
+            wchar_t* slash = wcsrchr(dir, L'\\');
+            if (slash) *slash = L'\0';
+            ShellExecuteW(nullptr, L"open", exe, nullptr, dir, SW_SHOWNORMAL);
+            PostQuitMessage(0);
+        }
+        // 取消：不重启（config 已保存，下次启动生效）
+    }
 
     // 共享窗口需销毁重建才能应用位置/样式改动
     // （ensure_window 只做懒创建，窗口存在时不会重建 → 新配置不生效）
@@ -514,7 +537,7 @@ void App::apply_config() {
 
 // 切换模型大小后，检查对应模型文件是否存在/完整；
 // 缺失 → 弹窗提示并可直接打开 model-dl.exe（带 --auto 直接下载对应大小）
-void App::check_model_files() {
+bool App::check_model_files() {
     const std::string mp = resolve_path("model");
     std::string main_f, proj_f;
     if (cfg_.model_size == "small") {
@@ -535,7 +558,7 @@ void App::check_model_files() {
     };
     const bool main_ok = size_ok(main_f, cfg_.model_size == "small" ? 500000000LL : 1000000000LL);
     const bool proj_ok = size_ok(proj_f, 100000000LL);
-    if (main_ok && proj_ok) return;
+    if (main_ok && proj_ok) return false;
 
     const std::string which = (cfg_.model_size == "small") ? "小模型（0.6B）" : "大模型（1.7B）";
     std::string miss;
@@ -549,6 +572,7 @@ void App::check_model_files() {
         const wchar_t* arg = (cfg_.model_size == "small") ? L"--auto --small" : L"--auto --large";
         ShellExecuteW(nullptr, L"open", L"model-dl.exe", arg, nullptr, SW_SHOWNORMAL);
     }
+    return true; // 目标模型缺失
 }
 
 void App::open_settings() {
