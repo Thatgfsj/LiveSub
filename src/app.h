@@ -141,5 +141,11 @@ private:
     // ASR 心跳
     std::atomic<int64_t> last_asr_heartbeat_ms_{0};
 
+    // 全屏检测（根本方案）：监听前台窗口变化事件，
+    // 全屏应用（播放器/浏览器/无边框游戏）出现瞬间立即把字幕窗口提到置顶层顶部
+    HWINEVENTHOOK win_event_hook_ = nullptr;
+    static void CALLBACK on_foreground_event(HWINEVENTHOOK h, DWORD ev, HWND hwnd,
+                                             LONG id, LONG cid, DWORD t, DWORD t2);
+
     std::atomic<bool> shutdown_done_{false};
 };

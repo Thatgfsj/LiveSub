@@ -20,7 +20,7 @@ public:
     struct Style {
         std::wstring font_family = L"Microsoft YaHei UI";
         float font_size = 42.0f;
-        float min_font_size = 32.0f;   // 最小字号（超行缩到该值后滚动）
+        float min_font_size = 42.0f;   // 最小字号（默认=默认字号即不缩）
         DWORD font_color = 0xFFFFFFFF;   // AARRGGBB
         DWORD bg_color   = 0xC0000000;   // AARRGGBB 半透明黑
         int window_w = 1280;

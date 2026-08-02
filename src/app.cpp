@@ -7,9 +7,34 @@
 
 #include "audio/wav_reader.h"
 
+// 全局单实例指针（前台窗口事件回调使用）
+static App* g_app = nullptr;
+
 App::~App() {
     shutdown();
     if (log_file_) { fclose(log_file_); log_file_ = nullptr; }
+}
+
+// 前台窗口变化事件：全屏应用出现 → 立即把字幕窗口提到置顶层顶部
+// （事件驱动，非轮询：只在全屏瞬间动作，平时零开销）
+void CALLBACK App::on_foreground_event(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) {
+    App* self = g_app;
+    if (!self || !self->window_.ok() || !self->cfg_.always_on_top) return;
+    const HWND fg = GetForegroundWindow();
+    if (!fg || fg == self->window_.hwnd()) return;
+    RECT r;
+    if (!GetWindowRect(fg, &r)) return;
+    // 前台窗口覆盖其所在显示器的完整区域 → 视为全屏
+    HMONITOR mon = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = { sizeof(mi) };
+    if (!GetMonitorInfo(mon, &mi)) return;
+    const bool fullscreen =
+        r.left <= mi.rcMonitor.left && r.top <= mi.rcMonitor.top &&
+        r.right >= mi.rcMonitor.right && r.bottom >= mi.rcMonitor.bottom;
+    if (fullscreen) {
+        SetWindowPos(self->window_.hwnd(), HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
 }
 
 void App::logf(const char* fmt, ...) {
@@ -290,6 +315,12 @@ bool App::init(const std::string& config_path, bool enable_capture) {
     // ASR 线程
     asr_running_ = true;
     asr_thread_ = std::thread(&App::asr_loop, this);
+
+    // 安装前台窗口变化钩子（全屏检测，根本方案）
+    g_app = this;
+    win_event_hook_ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+                                      nullptr, on_foreground_event, 0, 0,
+                                      WINEVENT_OUTOFCONTEXT);
 
     update_tray(TrayIcon::State::Ready, "LiveSub 就绪（双击设置）");
     logf("[app] 启动完成\n");
@@ -590,6 +621,12 @@ void App::run() {
 
 void App::shutdown() {
     if (shutdown_done_.exchange(true)) return;
+    // 卸载前台窗口事件钩子
+    if (win_event_hook_) {
+        UnhookWinEvent(win_event_hook_);
+        win_event_hook_ = nullptr;
+    }
+    g_app = nullptr;
     // 先销毁托盘与字幕窗口：点"退出"后界面立刻消失，
     // 避免模型释放（asr_.free() 可能耗时数秒）期间看起来"没反应"，被误以为要点两次
     tray_.destroy();
