@@ -1,64 +1,86 @@
-# LiveSub 项目介绍视频 · 幻灯片生成（1280x720，7 页）
-# 无任何隐私信息：不含用户名/邮箱/路径/凭据
+# LiveSub 介绍视频 · 幻灯片生成 v2（现代设计 + 模拟字幕条）
+# 1280x720，7 页；每页底部一条 LiveSub 风格字幕条（旁白核心句）
 from PIL import Image, ImageDraw, ImageFont
 
 W, H = 1280, 720
-FONT_TITLE = "C:/Windows/Fonts/msyh.ttc"
-FONT_BODY = "C:/Windows/Fonts/msyh.ttc"
-FONT_MONO = "C:/Windows/Fonts/consola.ttf"
+FONT = "C:/Windows/Fonts/msyh.ttc"
+
+# ---- 调色板（现代暗色 + 青蓝主色） ----
+BG_TOP = (18, 22, 36)      # 近黑蓝
+BG_BOT = (10, 12, 22)
+ACCENT = (80, 140, 255)    # 主青蓝
+ACCENT2 = (140, 100, 255)  # 紫
+TEXT_MAIN = (240, 244, 252)
+TEXT_SUB = (168, 178, 200)
+CARD_BG = (28, 34, 54)
+CARD_LINE = (70, 90, 150)
+
+def font(size, bold=False):
+    return ImageFont.truetype(FONT, size)
 
 def grad_bg():
-    """深蓝紫渐变背景"""
     img = Image.new("RGB", (W, H))
     px = img.load()
     for y in range(H):
         t = y / H
-        r = int(34 + 34 * t)
-        g = int(44 + 28 * t)
-        b = int(86 + 66 * t)
+        r = int(BG_TOP[0] + (BG_BOT[0] - BG_TOP[0]) * t)
+        g = int(BG_TOP[1] + (BG_BOT[1] - BG_TOP[1]) * t)
+        b = int(BG_TOP[2] + (BG_BOT[2] - BG_TOP[2]) * t)
         for x in range(W):
             px[x, y] = (r, g, b)
     return img
 
-def font(size, bold=False):
-    return ImageFont.truetype(FONT_TITLE, size)
-
-def center_text(d, cx, y, text, f, color=(255, 255, 255)):
+def center_text(d, cx, y, text, f, color=TEXT_MAIN):
     bb = d.textbbox((0, 0), text, font=f)
-    w = bb[2] - bb[0]
-    d.text((cx - w / 2 - bb[0], y - bb[1]), text, font=f, fill=color)
+    d.text((cx - (bb[2] - bb[0]) / 2 - bb[0], y - bb[1]), text, font=f, fill=color)
 
-def page_title(d, text):
-    center_text(d, W // 2, 70, text, font(52), (255, 255, 255))
-    # 标题下分隔线
-    d.rectangle([W // 2 - 180, 150, W // 2 + 180, 156], fill=(120, 140, 255))
+def page_title(d, text, sub=None):
+    center_text(d, W // 2, 56, text, font(46), TEXT_MAIN)
+    if sub:
+        center_text(d, W // 2, 118, sub, font(22), TEXT_SUB)
+    # 标题下渐变短横线
+    d.rounded_rectangle([W // 2 - 60, 152, W // 2 + 60, 156], radius=2, fill=ACCENT)
 
-def bullet(d, y, text, f, color=(222, 226, 240), mark="•", mx=180):
-    bb = d.textbbox((0, 0), mark, font=f)
-    d.text((mx - 30 - bb[0], y - bb[1]), mark, font=f, fill=(120, 170, 255))
-    d.text((mx + 10 - bb[0], y - bb[1]), text, font=f, fill=color)
+def card(d, cx, cy, w, h, text_lines, title=None, accent=ACCENT, radius=20):
+    """现代卡片：深底 + 细描边 + 主色顶条；text_lines 居中"""
+    x0, y0 = cx - w // 2, cy - h // 2
+    d.rounded_rectangle([x0, y0, x0 + w, y0 + h], radius=radius,
+                        fill=CARD_BG, outline=CARD_LINE, width=2)
+    d.rounded_rectangle([x0, y0, x0 + w, y0 + 6], radius=radius, fill=accent)
+    if title:
+        center_text(d, cx, y0 + 30, title, font(24), accent)
+    n = len(text_lines)
+    for i, ln in enumerate(text_lines):
+        center_text(d, cx, y0 + 60 + i * 44, ln, font(26), TEXT_MAIN if i == 0 else TEXT_SUB)
 
-def arrow(d, x1, y, x2, color=(120, 170, 255), w=6):
-    d.line([x1, y, x2 - 18, y], fill=color, width=w)
-    d.polygon([(x2 - 18, y - 12), (x2, y), (x2 - 18, y + 12)], fill=color)
+def subtitle_bar(d, text, y=600):
+    """模拟 LiveSub 字幕条：深色圆角条 + 白字 + 描边效果（产品演示）"""
+    f = font(30)
+    bb = d.textbbox((0, 0), text, font=f)
+    tw = bb[2] - bb[0]
+    bar_w = tw + 90
+    x0, y0 = W // 2 - bar_w // 2, y
+    d.rounded_rectangle([x0, y0, x0 + bar_w, y0 + 64], radius=14,
+                        fill=(0, 0, 0), outline=(60, 70, 100), width=2)
+    # 白字 + 黑描边（艺术字效果）
+    for dx, dy in [(-2, 0), (2, 0), (0, -2), (0, 2), (-2, -2), (2, 2), (-2, 2), (2, -2)]:
+        d.text((W // 2 - tw / 2 + dx - bb[0], y0 + 14 - bb[1]), text, font=f, fill=(0, 0, 0))
+    d.text((W // 2 - tw / 2 - bb[0], y0 + 14 - bb[1]), text, font=f, fill=(255, 255, 255))
 
-def chip(d, cx, y, text, f, w, h=64):
-    d.rounded_rectangle([cx - w // 2, y - h // 2, cx + w // 2, y + h // 2],
-                        radius=16, fill=(40, 52, 96), outline=(120, 170, 255), width=2)
-    center_text(d, cx, y - 14, text, font(24), (255, 255, 255))
-    return y + h // 2
-
-def chip_flow(d, items, y0):
-    """一排流程芯片（带箭头）"""
+def chip_flow(d, items, y0, accent=ACCENT):
+    """一排流程卡片（带箭头）"""
     n = len(items)
-    step = 230
-    total = (n - 1) * step
-    x0 = W // 2 - total // 2
+    step = 250
+    x0 = W // 2 - (n - 1) * step // 2
     for i, t in enumerate(items):
         cx = x0 + i * step
-        chip(d, cx, y0, t, font(26), 200, 60)
+        d.rounded_rectangle([cx - 105, y0 - 32, cx + 105, y0 + 32], radius=16,
+                            fill=CARD_BG, outline=CARD_LINE, width=2)
+        center_text(d, cx, y0 - 9, t, font(24), TEXT_MAIN)
         if i < n - 1:
-            arrow(d, cx + 105, y0, cx + step - 105, (120, 170, 255), 5)
+            ax = cx + 105
+            d.line([ax, y0, ax + 40, y0], fill=ACCENT, width=5)
+            d.polygon([(ax + 40, y0 - 9), (ax + 52, y0), (ax + 40, y0 + 9)], fill=ACCENT)
     return y0 + 70
 
 def make(page, out):
@@ -67,58 +89,57 @@ def make(page, out):
 
     if page == 1:
         # ============ 封面 ============
-        center_text(d, W // 2, 250, "LiveSub", font(110), (255, 255, 255))
-        center_text(d, W // 2, 360, "直播实时字幕工具", font(48), (160, 200, 255))
-        d.rounded_rectangle([W // 2 - 260, 430, W // 2 + 260, 500],
-                            radius=30, fill=(58, 76, 140), outline=(120, 170, 255), width=3)
-        center_text(d, W // 2, 462, "本地 AI 语音识别 · 纯本地运行", font(28), (255, 255, 255))
-        center_text(d, W // 2, 570, "麦克风 / 电脑声音 → 实时字幕，OBS 窗口捕获直接叠加", font(26), (170, 178, 210))
+        center_text(d, W // 2, 200, "LiveSub", font(120), TEXT_MAIN)
+        center_text(d, W // 2, 320, "直播实时字幕", font(52), ACCENT)
+        # 装饰：顶部光斑
+        d.ellipse([W // 2 - 260, 120, W // 2 + 260, 340], outline=(40, 60, 120), width=2)
+        subtitle_bar(d, "直播说话，字幕自动出现")
 
     elif page == 2:
-        # ============ 核心能力 ============
-        page_title(d, "核心能力")
-        bullet(d, 250, "实时字幕：说话即出字，端到端延迟 < 2 秒", font(36))
-        bullet(d, 340, "双音源：麦克风字幕（讲解）+ 电脑声音字幕（视频/直播）", font(36))
-        bullet(d, 430, "纯本地推理：本地模型识别，无云端上传，隐私安全", font(36))
-        bullet(d, 520, "单引擎共享：双音源共用一份模型，显存占用低", font(36))
+        # ============ 痛点 ============
+        page_title(d, "观众听不清你说话？", "直播环境嘈杂 · 口音 · 语速 · 回声")
+        card(d, W // 2, 330, 720, 200, ["以前：人工打字、付费服务、等剪辑"], title="过去", accent=(120, 130, 150))
+        card(d, W // 2, 560, 720, 130, ["现在：打开就说话，字幕自己出现"], title="现在", accent=ACCENT)
+        subtitle_bar(d, "不用打字，不用剪辑")
 
     elif page == 3:
-        # ============ 技术架构 ============
-        page_title(d, "技术架构")
-        chip_flow(d, ["音频采集", "语音检测", "分窗", "本地 ASR", "字幕窗口"], 290)
-        center_text(d, W // 2, 430, "音频采集：WASAPI（麦克风 / 电脑声音 loopback）", font(28), (190, 198, 228))
-        center_text(d, W // 2, 480, "语音检测：VAD 自适应门限，只识别有效语音段", font(28), (190, 198, 228))
-        center_text(d, W // 2, 530, "本地 ASR：Qwen3-ASR 模型（Vulkan GPU 加速，CPU 可回退）", font(28), (190, 198, 228))
-        center_text(d, W // 2, 580, "字幕窗口：Direct2D 透明渲染，稳定不回退的流式字幕", font(28), (190, 198, 228))
+        # ============ 怎么用 ============
+        page_title(d, "怎么用？打开，说话", "三步开始")
+        chip_flow(d, ["打开 LiveSub", "对着麦克风说话", "字幕上屏"], 300)
+        card(d, W // 2, 480, 760, 150, ["约 1 秒出字，边说边出", "全程本地识别，声音不上传"], accent=ACCENT)
+        subtitle_bar(d, "你的声音，不出你的电脑")
 
     elif page == 4:
-        # ============ 字幕窗口 ============
-        page_title(d, "字幕窗口（展示框）")
-        bullet(d, 240, "透明置顶：悬浮于任何画面之上，供 OBS 窗口捕获", font(34))
-        bullet(d, 320, "字体样式：字号 / 颜色 / 背景透明度 / 艺术字描边", font(34))
-        bullet(d, 400, "位置像素级自定义（中心坐标），点击穿透不挡操作", font(34))
-        bullet(d, 480, "最多两行：上一句 + 当前句，长句自动缩小字号", font(34))
+        # ============ 两个场景 ============
+        page_title(d, "两个场景，一个窗口", "直播讲解 / 看视频看直播")
+        card(d, 320, 320, 420, 220, ["直播讲解", "麦克风字幕"], title="场景一", accent=ACCENT)
+        card(d, 960, 320, 420, 220, ["看视频 / 直播", "电脑声音字幕"], title="场景二", accent=ACCENT2)
+        center_text(d, W // 2, 500, "字幕窗口透明置顶，位置样式随你调", font(26), TEXT_SUB)
+        subtitle_bar(d, "两个场景，一个窗口")
 
     elif page == 5:
-        # ============ 托盘交互 ============
-        page_title(d, "托盘集成（右下角）")
-        bullet(d, 240, "状态灯：蓝=就绪  绿=识别中  红=错误", font(34))
-        bullet(d, 320, "语音输入：定稿句直接输入当前焦点窗口（听写）", font(34))
-        bullet(d, 400, "讲话稿记录：按时间命名存到桌面，随时回顾", font(34))
-        bullet(d, 480, "快捷切换：麦克风 / 电脑字幕开关即点即用", font(34))
+        # ============ OBS ============
+        page_title(d, "直接进直播画面")
+        chip_flow(d, ["OBS 窗口捕获", "选择 LiveSub 字幕", "叠加进直播"], 300)
+        card(d, W // 2, 490, 760, 140, ["字体、描边、位置、透明度，按你的风格来", "鼠标穿透不挡操作"], accent=ACCENT)
+        subtitle_bar(d, "观众看得清清楚楚")
 
     elif page == 6:
-        # ============ 模型下载器 ============
-        page_title(d, "模型下载器")
-        chip_flow(d, ["大模型 1.7B", "更准确 · 推荐", "约 2.8GB"], 250)
-        chip_flow(d, ["小模型 0.6B", "更快 · 低要求", "约 1.1GB"], 400)
-        bullet(d, 540, "双镜像源 + 断点续传，断线自动重试，损坏自动重下", font(30))
+        # ============ 额外价值 ============
+        page_title(d, "还不止字幕")
+        card(d, 320, 320, 420, 220, ["语音输入", "说话代替打字，直接输入聊天框"], title="听写", accent=ACCENT)
+        card(d, 960, 320, 420, 220, ["讲话稿记录", "直播结束，文稿已经在桌面"], title="记录", accent=ACCENT2)
+        center_text(d, W // 2, 520, "中英日韩自动识别", font(26), TEXT_SUB)
+        subtitle_bar(d, "说完，就都有了")
 
     elif page == 7:
         # ============ 结尾 ============
-        center_text(d, W // 2, 260, "纯本地 · 低延迟 · 免费开源", font(56), (255, 255, 255))
-        center_text(d, W // 2, 370, "直播 / 录播 / 视频会议 皆可用", font(36), (160, 200, 255))
-        center_text(d, W // 2, 500, "GitHub 搜索 LiveSub 获取安装包", font(32), (170, 178, 210))
+        center_text(d, W // 2, 240, "纯本地 · 低延迟 · 免费开源", font(52), TEXT_MAIN)
+        center_text(d, W // 2, 330, "下一个直播，就让它替你打字幕", font(32), ACCENT)
+        d.rounded_rectangle([W // 2 - 220, 400, W // 2 + 220, 470], radius=24,
+                            fill=CARD_BG, outline=ACCENT, width=2)
+        center_text(d, W // 2, 432, "GitHub 搜索 LiveSub", font(30), TEXT_MAIN)
+        subtitle_bar(d, "下载安装包，两分钟用上")
 
     img.save(out)
     print("saved", out)

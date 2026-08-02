@@ -322,7 +322,7 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
     };
 
     const UINT32 max = (UINT32)std::max(1, style_.max_lines);
-    const float min_size = style_.font_size * 0.5f;
+    const float min_size = std::max(8.0f, style_.min_font_size); // 最小字号（配置）
 
     IDWriteTextLayout* l = make(text);
     if (!l) return;

@@ -172,6 +172,7 @@ Config Config::load(const std::string& path) {
 
     c.font_family        = get_str(kv, "ui.font_family", c.font_family);
     c.font_size          = get_float(kv, "ui.font_size", c.font_size);
+    c.min_font_size      = get_float(kv, "ui.min_font_size", c.min_font_size);
     c.font_color         = get_str(kv, "ui.font_color", c.font_color);
     c.bg_color           = get_str(kv, "ui.bg_color", c.bg_color);
     c.stroke_enabled     = get_bool(kv, "ui.stroke_enabled", c.stroke_enabled);
@@ -249,6 +250,7 @@ void Config::save(const std::string& path) const {
     w("[ui]");
     w("font_family = " + font_family);
     w("font_size = " + std::to_string(font_size));
+    w("min_font_size = " + std::to_string(min_font_size));
     w("font_color = " + font_color);
     w("bg_color = " + bg_color);
     w("stroke_enabled = " + std::string(stroke_enabled ? "true" : "false"));

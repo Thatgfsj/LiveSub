@@ -18,7 +18,7 @@ enum {
     // 页1 字幕显示
     IDC_FONT_SIZE = 1101, IDC_FONT_COLOR, IDC_BG_COLOR, IDC_BG_ALPHA,
     IDC_MAX_LINES, IDC_STROKE, IDC_STROKE_COLOR, IDC_STROKE_W,
-    IDC_WIN_X, IDC_WIN_Y, IDC_TOP, IDC_CLICK_THRU,
+    IDC_WIN_X, IDC_WIN_Y, IDC_TOP, IDC_CLICK_THRU, IDC_MIN_FONT_SIZE,
 
     // 页2 识别
     IDC_VAD_THRESH = 1201, IDC_SILENCE, IDC_CHUNK, IDC_HOP,
@@ -127,6 +127,7 @@ void SettingsWindow::fill_fields() {
     };
     // 页1 字幕
     set_edit(IDC_FONT_SIZE, std::to_wstring((int)cfg_.font_size));
+    set_edit(IDC_MIN_FONT_SIZE, std::to_wstring((int)cfg_.min_font_size));
     set_edit(IDC_FONT_COLOR, utf8_to_wide(cfg_.font_color));
     {
         // 背景颜色框只显示纯色 RGB（#RRGGBB），透明度单独一个框（0-100），
@@ -199,6 +200,7 @@ void SettingsWindow::read_fields() {
 
     // 页1 字幕
     cfg_.font_size         = (float)std::max(12, edit_int(IDC_FONT_SIZE, (int)cfg_.font_size));
+    cfg_.min_font_size     = (float)std::max(8, std::min((int)cfg_.font_size, edit_int(IDC_MIN_FONT_SIZE, (int)cfg_.min_font_size)));
     cfg_.font_color        = edit_str(IDC_FONT_COLOR);
     cfg_.bg_color          = edit_str(IDC_BG_COLOR);
     cfg_.pos_x             = std::max(0, std::min(GetSystemMetrics(SM_CXSCREEN), edit_int(IDC_WIN_X, cfg_.pos_x)));
@@ -247,7 +249,7 @@ void SettingsWindow::apply() {
 // 切换 Tab 页：只显示当前页的控件
 void SettingsWindow::show_page(int page) {
     const int pages[4][2] = {
-        {IDC_FONT_SIZE, IDC_CLICK_THRU},
+        {IDC_FONT_SIZE, IDC_MIN_FONT_SIZE},
         {IDC_VAD_THRESH, IDC_MODEL_DL},
         {IDC_DEVICE, IDC_PC_TRACK},
         {IDC_WRITE_NONE, IDC_WRITE_SRT},
@@ -423,8 +425,21 @@ void SettingsWindow::run() {
     g_cur_page = 0;
     // 列1 行尾不放说明文字：列1 hint 起点(≈264)会侵入列2 区域(≥340)造成重叠，
     // 关键范围说明已并入 label（如"透明度%(0-100)"）
-    add_label(h, L"字号", c1, row1(0));
-    add_edit(h, IDC_FONT_SIZE, c1e, row1(0));
+    // 字号行：默认字号 + 最小字号（双输入，同行不侵入列2）
+    {
+        HWND lb = CreateWindowW(L"STATIC", L"字号", WS_CHILD | WS_VISIBLE | SS_RIGHT,
+                                c1, row1(0) + S(4), S(70), S(20), h, nullptr,
+                                GetModuleHandleW(nullptr), nullptr);
+        register_ctl(lb);
+    }
+    add_edit(h, IDC_FONT_SIZE, c1 + S(76), row1(0));
+    {
+        HWND lb = CreateWindowW(L"STATIC", L"最小", WS_CHILD | WS_VISIBLE | SS_RIGHT,
+                                c1 + S(166), row1(0) + S(4), S(50), S(20), h, nullptr,
+                                GetModuleHandleW(nullptr), nullptr);
+        register_ctl(lb);
+    }
+    add_edit(h, IDC_MIN_FONT_SIZE, c1 + S(222), row1(0));
     add_label(h, L"文字颜色", c1, row1(1));
     add_edit(h, IDC_FONT_COLOR, c1e, row1(1));
     add_label(h, L"背景颜色", c1, row1(2));

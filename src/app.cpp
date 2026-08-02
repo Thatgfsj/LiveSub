@@ -40,6 +40,7 @@ bool App::ensure_window() {
     SubtitleWindow::Style st;
     st.font_family   = utf8_to_wide(cfg_.font_family);
     st.font_size     = cfg_.font_size;
+    st.min_font_size = cfg_.min_font_size;
     st.font_color    = parse_color(cfg_.font_color).value_or(0xFFFFFFFF);
     st.bg_color      = parse_color(cfg_.bg_color).value_or(0xC0000000);
     st.window_w      = cfg_.window_w;
@@ -91,9 +92,8 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
     p.vad->on_speech_start = [this, &p](int64_t) {
         p.speaking = true;
         if (p.queue) p.seg_start = p.queue->total_samples();
-        // "识别中…"只归麦克风轨（PC 轨字幕直接上屏，不占用主轨状态位）
-        // 注意：回调运行在采集线程，p.window 可能已被 stop_pipeline 置空 → 必须判空
-        if (p.window && &p == &mic_) p.window->set_status("识别中…");
+        // 不再显示"识别中…"：频繁说话时它会反复闪现（蹦迪感），
+        // 字幕本身 1 秒内就会上屏，无需状态文字
     };
     p.vad->on_speech_end = [this, &p](int64_t) {
         p.speaking = false;
