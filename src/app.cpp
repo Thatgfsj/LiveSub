@@ -158,13 +158,15 @@ void App::toggle_pipeline(AsrPipeline& p, bool enable) {
     if (enable) {
         const bool is_mic = (&p == &mic_);
         start_pipeline(p, is_mic);
-        if (is_mic) tray_.set_mic_enabled(p.enabled.load());
-        else tray_.set_pc_enabled(p.enabled.load());
+        // 回写配置并保存：设置窗口与托盘状态保持一致（下次打开设置显示同步状态）
+        if (is_mic) { cfg_.mic_enabled = p.enabled.load(); tray_.set_mic_enabled(p.enabled.load()); }
+        else        { cfg_.pc_enabled  = p.enabled.load(); tray_.set_pc_enabled(p.enabled.load()); }
     } else {
         stop_pipeline(p);
-        if (&p == &mic_) tray_.set_mic_enabled(false);
-        else tray_.set_pc_enabled(false);
+        if (&p == &mic_) { cfg_.mic_enabled = false; tray_.set_mic_enabled(false); }
+        else             { cfg_.pc_enabled  = false; tray_.set_pc_enabled(false); }
     }
+    cfg_.save(cfg_.path());
 }
 
 // ---------------------------------------------------------------------------
@@ -475,10 +477,25 @@ void App::apply_config() {
     // （ensure_window 只做懒创建，窗口存在时不会重建 → 新配置不生效）
     window_.destroy();
 
-    // 重启两条管线（应用新配置）
-    bool mic_on = mic_.enabled.load(), pc_on = pc_.enabled.load();
-    if (mic_on) { stop_pipeline(mic_); start_pipeline(mic_, true); }
-    if (pc_on)  { stop_pipeline(pc_);  start_pipeline(pc_, false); }
+    // 按设置里的开关状态对齐两条管线（设置窗口勾选变化 → 立即启停）
+    // 并同步托盘状态；已开启的管线重启以应用其余配置
+    const bool mic_target = cfg_.mic_enabled, pc_target = cfg_.pc_enabled;
+    if (mic_.enabled.load() != mic_target) {
+        if (mic_target) start_pipeline(mic_, true);
+        else            stop_pipeline(mic_);
+        tray_.set_mic_enabled(mic_target);
+    } else if (mic_target) {
+        stop_pipeline(mic_);
+        start_pipeline(mic_, true);
+    }
+    if (pc_.enabled.load() != pc_target) {
+        if (pc_target) start_pipeline(pc_, false);
+        else           stop_pipeline(pc_);
+        tray_.set_pc_enabled(pc_target);
+    } else if (pc_target) {
+        stop_pipeline(pc_);
+        start_pipeline(pc_, false);
+    }
     logf("[app] 设置已应用\n");
 }
 
