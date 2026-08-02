@@ -55,11 +55,13 @@ bool App::ensure_window() {
     st.stroke_color  = parse_color(cfg_.stroke_color).value_or(0xFF000000);
     st.stroke_width  = cfg_.stroke_width;
     // 位置：像素中心坐标（pos_x/pos_y 为窗口中心点）。
-    // 水平 clamp 到屏幕内（字幕横向完整可见）；垂直只保底 >=0，
-    // 允许窗口底部略超出屏幕——字幕内容居中显示仍完整可见（默认中心 900 贴近底部）
+    // 中心 clamp 到屏幕内（字幕文本约 140px 高，中心留 [80, sh-80] 保证完整可见）：
+    // 1080p 屏默认 Y=1250 自动落到 1000，字幕仍在屏幕底部可见；2K 屏设置的 1250 不受影响
     const int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
-    st.window_x = std::max(0, std::min(cfg_.pos_x - st.window_w / 2, sw - st.window_w));
-    st.window_y = std::max(0, cfg_.pos_y - st.window_h / 2);
+    const int cx = std::max(80, std::min(cfg_.pos_x, sw - 80));
+    const int cy = std::max(80, std::min(cfg_.pos_y, sh - 80));
+    st.window_x = std::max(0, std::min(cx - st.window_w / 2, sw - st.window_w));
+    st.window_y = std::max(0, cy - st.window_h / 2);
     std::wstring err;
     if (!window_.create(st, &err)) {
         logf("[app] 字幕窗口创建失败: %ls\n", err.c_str());

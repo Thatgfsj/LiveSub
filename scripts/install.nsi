@@ -76,6 +76,7 @@ Section "安装"
 
     ; 配置模板
     File /oname=config.ini "..\dist\LiveSub\config.ini"
+    File "..\dist\LiveSub\使用说明.txt"
 
     ; 模型目录（下载器会填充）
     CreateDirectory "$INSTDIR\model"
