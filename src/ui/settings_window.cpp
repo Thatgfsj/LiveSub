@@ -460,14 +460,26 @@ void SettingsWindow::run() {
                                 GetModuleHandleW(nullptr), nullptr);
         register_ctl(lb);
     }
-    add_edit(h, IDC_WIN_ALPHA, c1 + S(252), row1(3));
+    CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                  c1 + S(246), row1(3), S(60), S(22), h, (HMENU)(INT_PTR)IDC_WIN_ALPHA,
+                  hinst, nullptr); // 宽 60：246+60=306 < 340，不侵入列2
     add_label(h, L"行数(1-6)", c1, row1(4));
     add_edit(h, IDC_MAX_LINES, c1e, row1(4));
+    // 描边一行四件套：文字描边[ ] 描边色[ ] 粗[ ] （紧凑排列，无大空隙）
     CreateWindowW(L"BUTTON", L"文字描边", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                  c1, row1(5), S(96), S(22), h, (HMENU)(INT_PTR)IDC_STROKE, hinst, nullptr);
-    add_edit(h, IDC_STROKE_COLOR, c1e, row1(5));
-    add_label(h, L"描边粗(0-3)", c1, row1(6));
-    add_edit(h, IDC_STROKE_W, c1e, row1(6));
+                  c1, row1(5), S(104), S(22), h, (HMENU)(INT_PTR)IDC_STROKE, hinst, nullptr);
+    CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                  c1 + S(112), row1(5), S(78), S(22), h, (HMENU)(INT_PTR)IDC_STROKE_COLOR,
+                  hinst, nullptr);
+    {
+        HWND lb = CreateWindowW(L"STATIC", L"粗", WS_CHILD | WS_VISIBLE | SS_RIGHT,
+                                c1 + S(198), row1(5) + S(4), S(30), S(20), h, nullptr,
+                                GetModuleHandleW(nullptr), nullptr);
+        register_ctl(lb);
+    }
+    CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                  c1 + S(232), row1(5), S(48), S(22), h, (HMENU)(INT_PTR)IDC_STROKE_W,
+                  hinst, nullptr); // 232+48=280 < 340
 
     add_label(h, L"横坐标(默认960)", c2, row1(0));
     add_edit(h, IDC_WIN_X, c2e, row1(0));
