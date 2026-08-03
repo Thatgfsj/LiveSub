@@ -23,6 +23,7 @@ public:
         float min_font_size = 42.0f;   // 最小字号（默认=默认字号即不缩）
         DWORD font_color = 0xFFFFFFFF;   // AARRGGBB
         DWORD bg_color   = 0xC0000000;   // AARRGGBB 半透明黑
+        float window_alpha = 1.0f;      // 整体透明度 0-1（整个窗口，含文字）
         int window_w = 1280;
         int window_h = 200;
         int window_x = -1;               // -1 = 屏幕底部居中

@@ -68,6 +68,7 @@ bool App::ensure_window() {
     st.min_font_size = cfg_.min_font_size;
     st.font_color    = parse_color(cfg_.font_color).value_or(0xFFFFFFFF);
     st.bg_color      = parse_color(cfg_.bg_color).value_or(0xC0000000);
+    st.window_alpha  = (float)cfg_.window_alpha / 100.0f;
     st.window_w      = cfg_.window_w;
     st.window_h      = cfg_.window_h;
     st.max_lines     = cfg_.max_lines;

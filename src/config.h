@@ -34,6 +34,7 @@ struct Config {
     float min_font_size     = 42.0f;   // 最小字号（默认=默认字号即不缩；用户可自行改小）
     std::string font_color  = "#FFFFFF";
     std::string bg_color    = "#33000000"; // AARRGGBB 半透明黑（透明度 20%）
+    int  window_alpha       = 100;     // 整体透明度%（整个字幕窗口，0-100，100=不透明）
     bool  stroke_enabled    = true;     // 文字描边（艺术字效果）
     std::string stroke_color = "#000000"; // 描边颜色（默认黑色）
     int   stroke_width     = 2;        // 描边粗细（像素）

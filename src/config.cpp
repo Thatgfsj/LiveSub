@@ -175,6 +175,7 @@ Config Config::load(const std::string& path) {
     c.min_font_size      = get_float(kv, "ui.min_font_size", c.min_font_size);
     c.font_color         = get_str(kv, "ui.font_color", c.font_color);
     c.bg_color           = get_str(kv, "ui.bg_color", c.bg_color);
+    c.window_alpha       = std::max(0, std::min(100, get_int(kv, "ui.window_alpha", c.window_alpha)));
     c.stroke_enabled     = get_bool(kv, "ui.stroke_enabled", c.stroke_enabled);
     c.stroke_color       = get_str(kv, "ui.stroke_color", c.stroke_color);
     c.stroke_width       = std::max(0, std::min(3, get_int(kv, "ui.stroke_width", c.stroke_width))); // 0-3，0=关闭
@@ -253,6 +254,7 @@ void Config::save(const std::string& path) const {
     w("min_font_size = " + std::to_string(min_font_size));
     w("font_color = " + font_color);
     w("bg_color = " + bg_color);
+    w("window_alpha = " + std::to_string(window_alpha));
     w("stroke_enabled = " + std::string(stroke_enabled ? "true" : "false"));
     w("stroke_color = " + stroke_color);
     w("stroke_width = " + std::to_string(stroke_width));

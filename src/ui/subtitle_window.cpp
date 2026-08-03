@@ -276,7 +276,7 @@ void SubtitleWindow::render() {
     HDC screen_dc = GetDC(nullptr);
     POINT pt = {0, 0};
     SIZE sz = {dib_w_, dib_h_};
-    BLENDFUNCTION blend = {AC_SRC_OVER, 0, (BYTE)(alpha_ * 255.0f), AC_SRC_ALPHA};
+    BLENDFUNCTION blend = {AC_SRC_OVER, 0, (BYTE)(alpha_ * style_.window_alpha * 255.0f), AC_SRC_ALPHA};
     UpdateLayeredWindow(hwnd_, screen_dc, nullptr, &sz, mem_dc_, &pt, 0, &blend, ULW_ALPHA);
     ReleaseDC(nullptr, screen_dc);
 }

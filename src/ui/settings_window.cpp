@@ -18,7 +18,7 @@ enum {
     // 页1 字幕显示
     IDC_FONT_SIZE = 1101, IDC_FONT_COLOR, IDC_BG_COLOR, IDC_BG_ALPHA,
     IDC_MAX_LINES, IDC_STROKE, IDC_STROKE_COLOR, IDC_STROKE_W,
-    IDC_WIN_X, IDC_WIN_Y, IDC_TOP, IDC_CLICK_THRU, IDC_MIN_FONT_SIZE,
+    IDC_WIN_X, IDC_WIN_Y, IDC_TOP, IDC_CLICK_THRU, IDC_MIN_FONT_SIZE, IDC_WIN_ALPHA,
 
     // 页2 识别
     IDC_VAD_THRESH = 1201, IDC_SILENCE, IDC_CHUNK, IDC_HOP,
@@ -139,6 +139,7 @@ void SettingsWindow::fill_fields() {
         set_edit(IDC_BG_COLOR, utf8_to_wide(rgb));
         set_edit(IDC_BG_ALPHA, std::to_wstring(pct));
     }
+    set_edit(IDC_WIN_ALPHA, std::to_wstring(cfg_.window_alpha));
     set_edit(IDC_MAX_LINES, std::to_wstring(cfg_.max_lines));
     set_edit(IDC_STROKE_COLOR, utf8_to_wide(cfg_.stroke_color));
     set_edit(IDC_STROKE_W, std::to_wstring(cfg_.stroke_width));
@@ -214,6 +215,7 @@ void SettingsWindow::read_fields() {
         cfg_.bg_color = buf;
     }
     cfg_.max_lines = std::max(1, std::min(6, edit_int(IDC_MAX_LINES, cfg_.max_lines)));
+    cfg_.window_alpha = std::max(0, std::min(100, edit_int(IDC_WIN_ALPHA, cfg_.window_alpha)));
     cfg_.stroke_enabled = IsDlgButtonChecked(hwnd_, IDC_STROKE) == BST_CHECKED;
     cfg_.stroke_color   = edit_str(IDC_STROKE_COLOR);
     cfg_.stroke_width   = std::max(0, std::min(3, edit_int(IDC_STROKE_W, cfg_.stroke_width))); // 0=关闭描边
@@ -249,7 +251,7 @@ void SettingsWindow::apply() {
 // 切换 Tab 页：只显示当前页的控件
 void SettingsWindow::show_page(int page) {
     const int pages[4][2] = {
-        {IDC_FONT_SIZE, IDC_MIN_FONT_SIZE},
+        {IDC_FONT_SIZE, IDC_WIN_ALPHA},
         {IDC_VAD_THRESH, IDC_MODEL_DL},
         {IDC_DEVICE, IDC_PC_TRACK},
         {IDC_WRITE_NONE, IDC_WRITE_SRT},
@@ -444,8 +446,21 @@ void SettingsWindow::run() {
     add_edit(h, IDC_FONT_COLOR, c1e, row1(1));
     add_label(h, L"背景颜色", c1, row1(2));
     add_edit(h, IDC_BG_COLOR, c1e, row1(2));
-    add_label(h, L"背景透明度", c1, row1(3));
-    add_edit(h, IDC_BG_ALPHA, c1e, row1(3));
+    // 背景透明度 + 整体透明度（同行双输入）
+    {
+        HWND lb = CreateWindowW(L"STATIC", L"背景透明度", WS_CHILD | WS_VISIBLE | SS_RIGHT,
+                                c1, row1(3) + S(4), S(96), S(20), h, nullptr,
+                                GetModuleHandleW(nullptr), nullptr);
+        register_ctl(lb);
+    }
+    add_edit(h, IDC_BG_ALPHA, c1 + S(102), row1(3));
+    {
+        HWND lb = CreateWindowW(L"STATIC", L"整体", WS_CHILD | WS_VISIBLE | SS_RIGHT,
+                                c1 + S(196), row1(3) + S(4), S(52), S(20), h, nullptr,
+                                GetModuleHandleW(nullptr), nullptr);
+        register_ctl(lb);
+    }
+    add_edit(h, IDC_WIN_ALPHA, c1 + S(252), row1(3));
     add_label(h, L"行数(1-6)", c1, row1(4));
     add_edit(h, IDC_MAX_LINES, c1e, row1(4));
     CreateWindowW(L"BUTTON", L"文字描边", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
