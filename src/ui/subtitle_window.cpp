@@ -161,11 +161,14 @@ void SubtitleWindow::apply_style() {
                              (style_.font_color & 0xFF) / 255.0f,
                              (style_.font_color >> 24 & 0xFF) / 255.0f),
                 &text_brush_);
-            // interim（未确认尾部）：不透明灰字（不是 alpha 半透明！）
-            // 半透明白字叠加在黑描边上 → 边缘灰白混合发虚（越新的字越明显）；
-            // 改用不透明灰：边缘清晰，同时保留"未确认"的视觉区分
+            // interim（未确认尾部）：与已确认文本同色（白色实色）
+            // 灰色/半透明在深色背景上对比度低，看起来模糊；
+            // 用户不需要"未确认"的视觉区分，统一白色最清晰
             target_->CreateSolidColorBrush(
-                D2D1::ColorF(0.58f, 0.58f, 0.58f, 1.0f),
+                D2D1::ColorF((style_.font_color >> 16 & 0xFF) / 255.0f,
+                             (style_.font_color >> 8 & 0xFF) / 255.0f,
+                             (style_.font_color & 0xFF) / 255.0f,
+                             (style_.font_color >> 24 & 0xFF) / 255.0f),
                 &interim_brush_);
             // 描边色（艺术字效果，默认黑）
             target_->CreateSolidColorBrush(

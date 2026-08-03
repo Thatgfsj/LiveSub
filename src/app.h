@@ -48,6 +48,9 @@ struct AsrPipeline {
     std::atomic<size_t> finalize_seg_start{0};
     std::atomic<size_t> finalize_seg_end{0};
     std::atomic<size_t> last_processed{0};
+    // 新段开始清空上一句（避免"定稿句+新句"混存导致行数问题）；
+    // 采集线程只置标志，ASR 线程处理（避免跨线程直接操作 merger）
+    std::atomic<bool> clear_merger{false};
 
     // 识别与显示
     TextMerger merger;

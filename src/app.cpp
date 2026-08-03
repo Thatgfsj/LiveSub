@@ -121,6 +121,9 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
         // 不能用回调时刻的 total_samples——那会晚约 min_speech_ms(250ms)，
         // 把开头的 1-2 个字切掉（"第一个字识别不到"）
         if (p.queue) p.seg_start = (size_t)(start_ms * asr_.sample_rate() / 1000);
+        // 新段清空上一句：ASR 线程处理（见 process_pipeline），
+        // 避免"定稿句+新句"混存导致行数/视觉混乱
+        p.clear_merger = true;
         // 不再显示"识别中…"：频繁说话时它会反复闪现（蹦迪感），
         // 字幕本身 1 秒内就会上屏，无需状态文字
     };
@@ -349,6 +352,10 @@ void App::on_audio(AsrPipeline& p, const float* pcm, size_t n, int64_t t_ms) {
 bool App::process_pipeline(AsrPipeline& p) {
     // 与 stop_pipeline/start_pipeline 互斥：防止 ASR 线程使用 queue/vad 时被并发 delete
     std::lock_guard<std::mutex> plk(pipeline_mtx_);
+    // 新段开始：清空上一句（每段只显示当前句，行数恒定）
+    if (p.clear_merger.exchange(false)) {
+        p.merger.clear();
+    }
     const int64_t t_now = now_ms();
     const bool finalize = p.finalize_pending.exchange(false);
     if (!p.enabled.load() || !p.queue) {
