@@ -4,6 +4,7 @@
 #include <dwrite.h>
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 // 分层窗口 + UpdateLayeredWindow：
@@ -113,9 +114,18 @@ bool SubtitleWindow::create(const Style& s, std::wstring* err) {
     alpha_ = 1.0f;
     anim_has_content_ = true;
 
-    const UINT interval = std::max(1, 1000 / std::max(1, style_.fps));
-    timer_ = SetTimer(hwnd_, 1, interval, nullptr);
+    // 惰性定时器：内容静止时完全无定时器（主线程零唤醒），
+    // set_text/set_status 变化时才 SetTimer 唤醒一帧重绘，画完静止再关
+    timer_ = 0;
     return true;
+}
+
+// 内容变化/动画期间需要定时重绘 → 确保定时器在跑（可从 ASR 线程调用）
+void SubtitleWindow::ensure_timer() {
+    if (!timer_ && hwnd_) {
+        const UINT interval = std::max(1, 1000 / std::max(1, style_.fps));
+        timer_ = SetTimer(hwnd_, 1, interval, nullptr);
+    }
 }
 
 void SubtitleWindow::release_d2d() {
@@ -196,15 +206,33 @@ void SubtitleWindow::render() {
     if (!hwnd_ || !mem_dc_ || !dib_) return;
     if (IsWindowVisible(hwnd_) == FALSE) return;
 
-    // 1. 淡入淡出动画：内容从无到有 → 渐入；从有到无 → 渐出
+    // 0. 静止跳过：无内容变化、无动画进行时零开销（不重绘、不 ULW）。
+    //    长时间运行卡顿/黑屏的根因：WM_TIMER 每帧全量重绘 + UpdateLayeredWindow，
+    //    即使文本几小时没变也持续占用主线程与 DWM 合成 → 系统判定窗口无响应。
+    bool need_paint = false;
     {
         std::lock_guard<std::mutex> lk(mtx_);
         const bool has_content = !content_.empty() || !status_.empty();
+        const float target_alpha = has_content ? 1.0f : 0.0f;
         if (has_content != anim_has_content_) {
             anim_has_content_ = has_content;
             last_anim_ms_ = (int64_t)GetTickCount64();
+            need_paint = true; // 内容有无切换 → 开始淡入/淡出
+        } else if (std::fabs(alpha_ - target_alpha) > 0.0001f) {
+            need_paint = true; // 动画进行中
         }
     }
+    if (layout_dirty_.exchange(false)) need_paint = true; // 文本变化
+    if (!need_paint) {
+        // 完全静止：关掉定时器，主线程不再被唤醒（直到下次内容变化）
+        if (timer_) {
+            KillTimer(hwnd_, timer_);
+            timer_ = 0;
+        }
+        return;
+    }
+
+    // 1. 淡入淡出动画：内容从无到有 → 渐入；从有到无 → 渐出
     {
         const int64_t now = (int64_t)GetTickCount64();
         const float dt = (float)(now - last_anim_ms_) / 1000.0f;
@@ -291,6 +319,7 @@ void SubtitleWindow::set_text(const std::string& text, size_t confirmed_offset) 
         confirmed_offset_ = confirmed_offset; // 与 content_ 同锁，避免与渲染线程竞争
     }
     layout_dirty_ = true;
+    ensure_timer(); // 唤醒重绘（静止时定时器已关）
 }
 
 void SubtitleWindow::set_status(const std::string& status) {
@@ -299,6 +328,7 @@ void SubtitleWindow::set_status(const std::string& status) {
         status_ = to_wide(status);
     }
     layout_dirty_ = true;
+    ensure_timer();
 }
 
 // 构建文本布局：

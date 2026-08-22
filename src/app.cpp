@@ -15,13 +15,14 @@ App::~App() {
     if (log_file_) { fclose(log_file_); log_file_ = nullptr; }
 }
 
-// 前台窗口变化事件：全屏应用出现 → 立即把字幕窗口提到置顶层顶部
+// 前台窗口变化 / 窗口尺寸变化事件：全屏应用出现 → 立即把字幕窗口提到置顶层顶部
 // （事件驱动，非轮询：只在全屏瞬间动作，平时零开销）
-void CALLBACK App::on_foreground_event(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) {
+// LOCATIONCHANGE 全系统窗口移动都会触发 → 先按事件自带的 hwnd 过滤，非前台窗口直接返回
+void CALLBACK App::on_foreground_event(HWINEVENTHOOK, DWORD, HWND hwnd, LONG, LONG, DWORD, DWORD) {
     App* self = g_app;
     if (!self || !self->window_.ok() || !self->cfg_.always_on_top) return;
     const HWND fg = GetForegroundWindow();
-    if (!fg || fg == self->window_.hwnd()) return;
+    if (!fg || fg == self->window_.hwnd() || hwnd != fg) return;
     RECT r;
     if (!GetWindowRect(fg, &r)) return;
     // 前台窗口覆盖其所在显示器的完整区域 → 视为全屏
@@ -106,10 +107,10 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
     p.window = &window_;
 
     // 队列 / VAD / 重采样
-    p.resampler = new Resampler(cfg_.sample_rate, asr_.sample_rate());
-    p.queue = new AudioQueue(asr_.sample_rate(), cfg_.chunk_ms * 3, cfg_.chunk_ms, cfg_.hop_ms);
+    p.resampler = new Resampler(cfg_.sample_rate, asr_->sample_rate());
+    p.queue = new AudioQueue(asr_->sample_rate(), cfg_.chunk_ms * 3, cfg_.chunk_ms, cfg_.hop_ms);
     Vad::Params vp;
-    vp.sample_rate   = asr_.sample_rate();
+    vp.sample_rate   = asr_->sample_rate();
     vp.threshold_db  = cfg_.vad_threshold_db;
     vp.margin_db     = cfg_.vad_margin_db;
     vp.min_speech_ms = cfg_.min_speech_ms;
@@ -120,7 +121,7 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
         // 段起点用 VAD 报告的语音真实起点（毫秒→样本序号），
         // 不能用回调时刻的 total_samples——那会晚约 min_speech_ms(250ms)，
         // 把开头的 1-2 个字切掉（"第一个字识别不到"）
-        if (p.queue) p.seg_start = (size_t)(start_ms * asr_.sample_rate() / 1000);
+        if (p.queue) p.seg_start = (size_t)(start_ms * asr_->sample_rate() / 1000);
         // 新段清空上一句：ASR 线程处理（见 process_pipeline），
         // 避免"定稿句+新句"混存导致行数/视觉混乱
         p.clear_merger = true;
@@ -131,7 +132,7 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
         p.speaking = false;
         if (p.queue) {
             // 段尾同样用 VAD 报告的时间（语音结束+静音），与队列累计基准一致
-            p.seg_end = (size_t)(end_ms * asr_.sample_rate() / 1000);
+            p.seg_end = (size_t)(end_ms * asr_->sample_rate() / 1000);
             // 快照段边界：避免新段 speech_start 覆盖 seg_start，
             // 导致 finalize 取段失败（定稿/语音输入丢失）
             p.finalize_seg_start = p.seg_start.load();
@@ -140,8 +141,8 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
         p.finalize_pending = true;
         if (p.window && &p == &mic_) p.window->set_status("");
     };
-    p.resample_buf.resize((size_t)asr_.sample_rate() * 2);
-    p.win_buf.reserve((size_t)asr_.sample_rate() * 32);
+    p.resample_buf.resize((size_t)asr_->sample_rate() * 2);
+    p.win_buf.reserve((size_t)asr_->sample_rate() * 32);
     p.merger.set_max_lines(cfg_.max_lines);
 
     // 输出（按设置：写文本文件 / 写 SRT）
@@ -284,10 +285,18 @@ bool App::init(const std::string& config_path, bool enable_capture) {
     pc_.name = "电脑声音";
     running_model_size_ = cfg_.model_size; // 记录当前运行模型
 
-    // 模型引擎（共享单实例）
-    AsrEngine::Params ap;
+    // 模型引擎（共享单实例）：按 model_size 选择实现
+    //   sensevoice/fast → sherpa-onnx（SenseVoice 离线 / 流式 zipformer）
+    //   large/small     → llama.cpp（Qwen3-ASR）
+    if (cfg_.model_size == "sensevoice" || cfg_.model_size == "fast") {
+        asr_ = std::make_unique<SherpaEngine>();
+    } else {
+        asr_ = std::make_unique<AsrEngine>();
+    }
+
+    AsrEngineParams ap;
     ap.model_path   = resolve_path(cfg_.model_path);
-    ap.mmproj_path  = resolve_path(cfg_.mmproj_path);
+    ap.aux_path     = resolve_path(cfg_.mmproj_path);
     ap.n_threads    = cfg_.n_threads;
     ap.gpu_layers   = cfg_.gpu_layers;
     ap.n_batch      = cfg_.n_batch;
@@ -295,7 +304,7 @@ bool App::init(const std::string& config_path, bool enable_capture) {
     ap.prompt       = cfg_.prompt;
     ap.verbosity    = cfg_.log_level;
     std::string aerr;
-    if (!asr_.init(ap, &aerr)) {
+    if (!asr_->init(ap, &aerr)) {
         logf("[app] ASR 引擎初始化失败: %s\n", aerr.c_str());
         update_tray(TrayIcon::State::Error, "LiveSub 出错: " + aerr);
         return false;
@@ -303,8 +312,8 @@ bool App::init(const std::string& config_path, bool enable_capture) {
 
     // GPU 预热
     {
-        std::vector<float> silence((size_t)asr_.sample_rate(), 0.0f);
-        AsrEngine::Result r = asr_.transcribe(silence.data(), silence.size());
+        std::vector<float> silence((size_t)asr_->sample_rate(), 0.0f);
+        AsrEngineResult r = asr_->transcribe(silence.data(), silence.size());
         logf("[app] 预热完成 %s\n", r.ok ? "OK" : "失败");
     }
 
@@ -329,6 +338,11 @@ bool App::init(const std::string& config_path, bool enable_capture) {
     win_event_hook_ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
                                       nullptr, on_foreground_event, 0, 0,
                                       WINEVENT_OUTOFCONTEXT);
+    // 游戏常"先启动窗口、再切成全屏"：此时前台窗口没变、只变尺寸，
+    // FOREGROUND 事件捕捉不到 → 再监听窗口位置/尺寸变化事件兜底
+    win_event_hook2_ = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
+                                       nullptr, on_foreground_event, 0, 0,
+                                       WINEVENT_OUTOFCONTEXT);
 
     update_tray(TrayIcon::State::Ready, "LiveSub 就绪（双击设置）");
     logf("[app] 启动完成\n");
@@ -369,7 +383,7 @@ bool App::process_pipeline(AsrPipeline& p) {
 
     // 数据增量不足一个 hop → 跳过（超时醒来防重复）
     const size_t total_now = p.queue->total_samples();
-    const size_t hop_samples = (size_t)asr_.sample_rate() * cfg_.hop_ms / 1000;
+    const size_t hop_samples = (size_t)asr_->sample_rate() * cfg_.hop_ms / 1000;
     if (!finalize && total_now - p.last_processed.load() < hop_samples) {
         last_asr_heartbeat_ms_ = t_now;
         return false;
@@ -377,7 +391,7 @@ bool App::process_pipeline(AsrPipeline& p) {
     p.last_processed = total_now;
 
     // 新段首窗最短 1.0s（对齐 whisper_streaming 默认 min-chunk-size=1.0s）
-    if (!finalize && total_now - p.seg_start.load() < (size_t)asr_.sample_rate()) {
+    if (!finalize && total_now - p.seg_start.load() < (size_t)asr_->sample_rate()) {
         last_asr_heartbeat_ms_ = t_now;
         return false;
     }
@@ -386,14 +400,14 @@ bool App::process_pipeline(AsrPipeline& p) {
     // 窗口上限统一 8s——定稿与最后一次 interim 用同一窗口 → 文本无缝不蹦字
     const size_t seg_now = finalize ? p.finalize_seg_start.load() : p.seg_start.load();
     const size_t seg_end = finalize ? p.finalize_seg_end.load() : 0;
-    const size_t max_len = (size_t)asr_.sample_rate() * 8;
+    const size_t max_len = (size_t)asr_->sample_rate() * 8;
     const size_t n = p.queue->take_segment(seg_now, seg_end, max_len, p.win_buf);
     if (n == 0) return false;
 
     // 活跃帧比例（防噪音误触发）
     if (!finalize) {
         const float th = p.vad ? p.vad->current_threshold_db() - 6.0f : -60.0f;
-        const size_t frame = (size_t)asr_.sample_rate() * 20 / 1000;
+        const size_t frame = (size_t)asr_->sample_rate() * 20 / 1000;
         int active = 0, frames = 0;
         for (size_t i = 0; i + frame <= n; i += frame) {
             double sum = 0.0;
@@ -414,11 +428,11 @@ bool App::process_pipeline(AsrPipeline& p) {
 
     // 共享单引擎：互斥串行识别
     const int64_t t0 = now_ms();
-    AsrEngine::Result r;
+    AsrEngineResult r;
     {
         std::lock_guard<std::mutex> lk(asr_mtx_);
         try {
-            r = asr_.transcribe(p.win_buf.data(), n);
+            r = asr_->transcribe(p.win_buf.data(), n);
         } catch (const std::exception& e) {
             logf("[%s] 引擎异常: %s\n", p.name.c_str(), e.what());
             if (&p == &mic_) p.window->set_status("识别引擎异常: " + std::string(e.what()));
@@ -454,9 +468,9 @@ bool App::process_pipeline(AsrPipeline& p) {
                  (long long)cost, finalize ? " [FINAL]" : "");
         }
     } else {
-        if (&p == &mic_) p.window->set_status("识别错误: " + asr_.last_error());
+        if (&p == &mic_) p.window->set_status("识别错误: " + asr_->last_error());
         if (cfg_.log_level >= 1) {
-            logf("[%s] 识别失败: %s\n", p.name.c_str(), asr_.last_error().c_str());
+            logf("[%s] 识别失败: %s\n", p.name.c_str(), asr_->last_error().c_str());
         }
     }
     return true;
@@ -487,7 +501,7 @@ bool App::run_wav_test(const std::string& wav_path) {
         return false;
     }
     std::vector<float> pcm16;
-    const int target = asr_.sample_rate();
+    const int target = asr_->sample_rate();
     if (wav_rate != target) {
         Resampler rs(wav_rate, target);
         pcm16.resize(pcm.size() * target / wav_rate + 64);
@@ -539,15 +553,12 @@ void App::apply_config() {
         const int ret = MessageBoxW(nullptr, msg.c_str(), L"LiveSub 模型切换",
                                     MB_YESNO | MB_ICONQUESTION);
         if (ret == IDYES) {
-            // 自动重启：先启动新实例，再退出当前进程
-            wchar_t exe[MAX_PATH] = {};
-            GetModuleFileNameW(nullptr, exe, MAX_PATH);
-            wchar_t dir[MAX_PATH] = {};
-            wcsncpy(dir, exe, MAX_PATH);
-            wchar_t* slash = wcsrchr(dir, L'\\');
-            if (slash) *slash = L'\0';
-            ShellExecuteW(nullptr, L"open", exe, nullptr, dir, SW_SHOWNORMAL);
+            // 只置重启标记并退出设置窗：PostQuitMessage 仅退出嵌套的
+            // 设置窗消息循环，主循环靠 restart_pending_ 整体退出；
+            // 新实例由 main() 在进程干净退出后拉起
+            restart_pending_ = true;
             PostQuitMessage(0);
+            return; // 进程即将退出，无需再销毁窗口/重启管线
         }
         // 取消：不重启（config 已保存，下次启动生效）
     }
@@ -582,15 +593,28 @@ void App::apply_config() {
 // 缺失 → 弹窗提示并可直接打开 model-dl.exe（带 --auto 直接下载对应大小）
 bool App::check_model_files() {
     const std::string mp = resolve_path("model");
-    std::string main_f, proj_f;
+    // 四种模型的主文件/辅助文件与完整性阈值（与下载器写入大小一致）
+    std::vector<std::pair<std::string, long long>> files; // {路径, 最小字节}
+    std::string which;
     if (cfg_.model_size == "small") {
-        main_f = mp + "\\Qwen3-ASR-0.6B-Q8_0.gguf";
-        proj_f = mp + "\\mmproj-Qwen3-ASR-0.6B-bf16.gguf";
+        files = {{mp + "\\Qwen3-ASR-0.6B-Q8_0.gguf",        500000000LL},
+                 {mp + "\\mmproj-Qwen3-ASR-0.6B-bf16.gguf", 100000000LL}};
+        which = "小模型（0.6B）";
+    } else if (cfg_.model_size == "sensevoice") {
+        files = {{mp + "\\sensevoice\\model.int8.onnx", 200000000LL},
+                 {mp + "\\sensevoice\\tokens.txt",      10000LL}};
+        which = "均衡模型（SenseVoice）";
+    } else if (cfg_.model_size == "fast") {
+        files = {{mp + "\\fast\\encoder-epoch-99-avg-1.int8.onnx", 150000000LL},
+                 {mp + "\\fast\\decoder-epoch-99-avg-1.int8.onnx", 10000000LL},
+                 {mp + "\\fast\\joiner-epoch-99-avg-1.int8.onnx",  3000000LL},
+                 {mp + "\\fast\\tokens.txt",                       10000LL}};
+        which = "极速模型（流式 zipformer）";
     } else {
-        main_f = mp + "\\Qwen3-ASR-1.7B-Q8_0.gguf";
-        proj_f = mp + "\\mmproj-Qwen3-ASR-1.7B-bf16.gguf";
+        files = {{mp + "\\Qwen3-ASR-1.7B-Q8_0.gguf",        1000000000LL},
+                 {mp + "\\mmproj-Qwen3-ASR-1.7B-bf16.gguf", 100000000LL}};
+        which = "大模型（1.7B）";
     }
-    // 文件大小检查（与启动检测一致：主模型 1GB/500MB，编码器 100MB）
     auto size_ok = [](const std::string& p, long long min_bytes) {
         FILE* f = fopen(p.c_str(), "rb");
         if (!f) return false;
@@ -599,20 +623,23 @@ bool App::check_model_files() {
         fclose(f);
         return sz > min_bytes;
     };
-    const bool main_ok = size_ok(main_f, cfg_.model_size == "small" ? 500000000LL : 1000000000LL);
-    const bool proj_ok = size_ok(proj_f, 100000000LL);
-    if (main_ok && proj_ok) return false;
-
-    const std::string which = (cfg_.model_size == "small") ? "小模型（0.6B）" : "大模型（1.7B）";
     std::string miss;
-    if (!main_ok) miss += "主模型文件未找到或不完整:\n  " + main_f;
-    if (!proj_ok) miss += std::string(miss.empty() ? "" : "\n") + "音频编码器未找到或不完整:\n  " + proj_f;
+    for (const auto& [path, min_bytes] : files) {
+        if (!size_ok(path, min_bytes)) {
+            miss += std::string(miss.empty() ? "" : "\n") + "文件未找到或不完整:\n  " + path;
+        }
+    }
+    if (miss.empty()) return false;
+
     const std::wstring msg =
         utf8_to_wide(which + "的" + miss + "\n\n是否现在打开模型下载器下载？");
     const int ret = MessageBoxW(nullptr, msg.c_str(), L"LiveSub 模型缺失",
                                 MB_YESNO | MB_ICONWARNING);
     if (ret == IDYES) {
-        const wchar_t* arg = (cfg_.model_size == "small") ? L"--auto --small" : L"--auto --large";
+        const wchar_t* arg =
+            cfg_.model_size == "small"      ? L"--auto --small" :
+            cfg_.model_size == "sensevoice" ? L"--auto --sensevoice" :
+            cfg_.model_size == "fast"       ? L"--auto --fast" : L"--auto --large";
         ShellExecuteW(nullptr, L"open", L"model-dl.exe", arg, nullptr, SW_SHOWNORMAL);
     }
     return true; // 目标模型缺失
@@ -628,6 +655,9 @@ void App::run() {
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
+        // 模型切换确认重启：设置窗嵌套循环退出后回到这里，
+        // 收到标记 → 退出主循环，让 main() 干净关闭并拉起新实例
+        if (restart_pending_.load()) break;
     }
 }
 
@@ -638,9 +668,13 @@ void App::shutdown() {
         UnhookWinEvent(win_event_hook_);
         win_event_hook_ = nullptr;
     }
+    if (win_event_hook2_) {
+        UnhookWinEvent(win_event_hook2_);
+        win_event_hook2_ = nullptr;
+    }
     g_app = nullptr;
     // 先销毁托盘与字幕窗口：点"退出"后界面立刻消失，
-    // 避免模型释放（asr_.free() 可能耗时数秒）期间看起来"没反应"，被误以为要点两次
+    // 避免模型释放（asr_->free() 可能耗时数秒）期间看起来"没反应"，被误以为要点两次
     tray_.destroy();
     tray_ready_ = false;
     window_.destroy();
@@ -650,5 +684,5 @@ void App::shutdown() {
     if (asr_thread_.joinable()) asr_thread_.join();
     stop_pipeline(mic_);
     stop_pipeline(pc_);
-    asr_.free();
+    asr_->free();
 }

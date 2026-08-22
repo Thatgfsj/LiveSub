@@ -57,6 +57,8 @@ public:
 private:
     void apply_style();
     void render();
+    // 惰性定时器：内容变化/动画期间确保定时器在跑（静止时 render 会关掉）
+    void ensure_timer();
     void release_d2d();
     std::wstring to_wide(const std::string& s) const;
 

@@ -111,9 +111,9 @@ int main(int argc, char** argv) {
 
     // 初始化引擎
     AsrEngine engine;
-    AsrEngine::Params p;
+    AsrEngineParams p;
     p.model_path = model;
-    p.mmproj_path = mmproj;
+    p.aux_path = mmproj;
     p.gpu_layers = gpu_layers;
     p.prompt = prompt;
     p.verbosity = 2;
@@ -136,7 +136,7 @@ int main(int argc, char** argv) {
     }
 
     // 转写
-    AsrEngine::Result r = engine.transcribe(pcm16.data(), pcm16.size());
+    AsrEngineResult r = engine.transcribe(pcm16.data(), pcm16.size());
     printf("\n===== 结果 =====\n");
     printf("语言: %s\n", r.language.empty() ? "(未检测)" : r.language.c_str());
     printf("文本: %s\n", r.text.c_str());

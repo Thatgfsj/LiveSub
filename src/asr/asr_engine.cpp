@@ -28,7 +28,7 @@ static int64_t now_ms() {
     return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
-bool AsrEngine::init(const Params& p, std::string* err) {
+bool AsrEngine::init(const AsrEngineParams& p, std::string* err) {
     free();
     p_ = p;
 
@@ -76,9 +76,9 @@ bool AsrEngine::init(const Params& p, std::string* err) {
     mctx_params.print_timings  = false;
     mctx_params.warmup         = true;
 
-    mtmd_ = mtmd_init_from_file(p_.mmproj_path.c_str(), model_, mctx_params);
+    mtmd_ = mtmd_init_from_file(p_.aux_path.c_str(), model_, mctx_params);
     if (!mtmd_) {
-        last_err_ = "无法加载音频编码器 (mmproj): " + p_.mmproj_path;
+        last_err_ = "无法加载音频编码器 (mmproj): " + p_.aux_path;
         if (err) *err = last_err_;
         return false;
     }
@@ -119,8 +119,8 @@ void AsrEngine::log(const std::string& msg) const {
     }
 }
 
-AsrEngine::Result AsrEngine::transcribe(const float* pcm, size_t n_samples) {
-    Result res;
+AsrEngineResult AsrEngine::transcribe(const float* pcm, size_t n_samples) {
+    AsrEngineResult res;
     const int64_t t0 = now_ms();
 
     if (!mtmd_ || n_samples == 0) return res;
@@ -244,7 +244,7 @@ AsrEngine::Result AsrEngine::transcribe(const float* pcm, size_t n_samples) {
     return res;
 }
 
-void AsrEngine::parse_output(const std::string& raw, Result& r) {
+void AsrEngine::parse_output(const std::string& raw, AsrEngineResult& r) {
     // 模型输出形如: language Chinese<asr_text>甚至出现交易几乎停滞的情况。
     // 或: <asr_text>文本
     const std::string lang_marker = "language ";

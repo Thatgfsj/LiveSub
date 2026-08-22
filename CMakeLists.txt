@@ -24,6 +24,21 @@ endif()
 
 find_package(Threads REQUIRED)
 
+# ---------------------------------------------------------------------------
+# sherpa-onnx（SenseVoice / 流式 zipformer 引擎）
+#   二进制库在 third_party/sherpa-onnx/lib（预编译 win-x64，运行时动态加载）；
+#   C API 头文件体积大不入仓，configure 时自动下载到 build 目录
+# ---------------------------------------------------------------------------
+set(SHERPA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sherpa-onnx")
+set(SHERPA_API_H "${SHERPA_DIR}/include/sherpa-onnx-c-api.h")
+if(NOT EXISTS "${SHERPA_API_H}")
+    file(MAKE_DIRECTORY "${SHERPA_DIR}/include")
+    file(DOWNLOAD
+        "https://cdn.jsdelivr.net/gh/k2-fsa/sherpa-onnx@v1.13.6/sherpa-onnx/c-api/c-api.h"
+        "${SHERPA_API_H}"
+        SHOW_PROGRESS)
+endif()
+
 if(LIVESUB_PREBUILT_VULKAN)
     set(LIVESUB_LLAMA_INCLUDE
         third_party/llama.cpp/include
@@ -67,6 +82,7 @@ add_executable(livesub WIN32
     src/asr/vad.cpp
     src/asr/audio_queue.cpp
     src/asr/asr_engine.cpp
+    src/asr/sherpa_engine.cpp
     src/asr/text_merge.cpp
     src/ui/subtitle_window.cpp
     src/ui/settings_window.cpp
@@ -75,7 +91,7 @@ add_executable(livesub WIN32
     src/input/voice_input.cpp
 )
 
-target_include_directories(livesub PRIVATE src)
+target_include_directories(livesub PRIVATE src ${SHERPA_DIR}/include)
 if(LIVESUB_PREBUILT_VULKAN)
     target_include_directories(livesub PRIVATE ${LIVESUB_LLAMA_INCLUDE})
 endif()
@@ -106,6 +122,14 @@ if(MINGW)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${MINGW_RUNTIME_DLLS} $<TARGET_FILE_DIR:livesub>)
     endif()
 endif()
+
+# sherpa-onnx 运行时 DLL（SenseVoice / 流式 zipformer 引擎用，动态加载）
+add_custom_command(TARGET livesub POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${SHERPA_DIR}/lib/sherpa-onnx-c-api.dll
+        ${SHERPA_DIR}/lib/onnxruntime.dll
+        ${SHERPA_DIR}/lib/onnxruntime_providers_shared.dll
+        $<TARGET_FILE_DIR:livesub>)
 
 # 预编译模式：运行时复制 DLL（ggml-cpu-* 为按 CPU 特性拆分的变体，运行时加载）
 if(LIVESUB_PREBUILT_VULKAN)

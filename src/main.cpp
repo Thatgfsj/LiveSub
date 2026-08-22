@@ -73,32 +73,43 @@ int main() {
         fclose(f);
     }
 
-    // 模型检测：缺失/不完整 → 提示启动下载器
+    // 模型检测：按当前配置的 model_size 检查对应文件，缺失/不完整 → 提示启动下载器
     {
+        const Config c = Config::load(config_path);
         const std::string mp = resolve_path("model");
-        const std::string main_f = mp + "\\Qwen3-ASR-1.7B-Q8_0.gguf";
-        const std::string sml_f  = mp + "\\Qwen3-ASR-0.6B-Q8_0.gguf";
-        const std::string proj_l = mp + "\\mmproj-Qwen3-ASR-1.7B-bf16.gguf";
-        const std::string proj_s = mp + "\\mmproj-Qwen3-ASR-0.6B-bf16.gguf";
-        bool has_model = false;
-        auto size_ok = [](const std::string& p, long long min_bytes) {
-            FILE* f = fopen(p.c_str(), "rb");
-            if (!f) return false;
+        struct ModelFile { std::string path; long long min_bytes; };
+        std::vector<ModelFile> need;
+        if (c.model_size == "small") {
+            need = {{mp + "\\Qwen3-ASR-0.6B-Q8_0.gguf", 500000000LL},
+                    {mp + "\\mmproj-Qwen3-ASR-0.6B-bf16.gguf", 100000000LL}};
+        } else if (c.model_size == "sensevoice") {
+            need = {{mp + "\\sensevoice\\model.int8.onnx", 200000000LL},
+                    {mp + "\\sensevoice\\tokens.txt", 10000LL}};
+        } else if (c.model_size == "fast") {
+            need = {{mp + "\\fast\\encoder-epoch-99-avg-1.int8.onnx", 150000000LL},
+                    {mp + "\\fast\\decoder-epoch-99-avg-1.int8.onnx", 10000000LL},
+                    {mp + "\\fast\\joiner-epoch-99-avg-1.int8.onnx", 3000000LL},
+                    {mp + "\\fast\\tokens.txt", 10000LL}};
+        } else {
+            need = {{mp + "\\Qwen3-ASR-1.7B-Q8_0.gguf", 1000000000LL},
+                    {mp + "\\mmproj-Qwen3-ASR-1.7B-bf16.gguf", 100000000LL}};
+        }
+        bool has_model = true;
+        for (const auto& mf : need) {
+            FILE* f = fopen(mf.path.c_str(), "rb");
+            if (!f) { has_model = false; break; }
             _fseeki64(f, 0, SEEK_END);
             const long long sz = _ftelli64(f);
             fclose(f);
-            return sz > min_bytes;
-        };
-        if (size_ok(main_f, 1000000000LL) && size_ok(proj_l, 100000000LL)) {
-            has_model = true;
-        } else if (size_ok(sml_f, 500000000LL) && size_ok(proj_s, 100000000LL)) {
-            has_model = true;
+            if (sz <= mf.min_bytes) { has_model = false; break; }
         }
         if (!has_model && wav_test.empty()) {
             const int ret = MessageBoxW(nullptr,
                 L"未检测到模型文件（model 目录）。\n\n"
-                L"大模型（1.7B）：更准确，约 2.8GB\n"
-                L"小模型（0.6B）：更快，约 1.1GB\n\n"
+                L"均衡 SenseVoice：中文最准，约 230MB（推荐）\n"
+                L"极速 流式zipformer：最快，约 190MB\n"
+                L"小模型 Qwen3-0.6B：约 1.1GB\n"
+                L"大模型 Qwen3-1.7B：约 2.7GB\n\n"
                 L"是否现在启动模型下载器？",
                 L"LiveSub", MB_YESNO | MB_ICONQUESTION);
             if (ret == IDYES) {
@@ -127,5 +138,12 @@ int main() {
 
     app.run();
     app.shutdown();
+    // 模型切换确认重启：进程已干净退出（模型文件/GPU 已释放）再拉起新实例，
+    // 新实例读取已保存的 config.ini → 加载新模型
+    if (app.restart_pending()) {
+        wchar_t exe[MAX_PATH] = {};
+        GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        ShellExecuteW(nullptr, L"open", exe, nullptr, nullptr, SW_SHOWNORMAL);
+    }
     return 0;
 }

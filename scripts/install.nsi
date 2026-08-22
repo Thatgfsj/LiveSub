@@ -74,6 +74,11 @@ Section "安装"
     File "..\dist\LiveSub\ggml-cpu-sapphirerapids.dll"
     File "..\dist\LiveSub\ggml-cpu-zen4.dll"
 
+    ; sherpa-onnx 运行时（SenseVoice / 流式 zipformer 引擎）
+    File "..\dist\LiveSub\sherpa-onnx-c-api.dll"
+    File "..\dist\LiveSub\onnxruntime.dll"
+    File "..\dist\LiveSub\onnxruntime_providers_shared.dll"
+
     ; 配置模板
     File /oname=config.ini "..\dist\LiveSub\config.ini"
     File "..\dist\LiveSub\使用说明.txt"

@@ -162,6 +162,9 @@ Config Config::load(const std::string& path) {
 
     c.model_path         = get_str(kv, "asr.model_path", c.model_path);
     c.mmproj_path        = get_str(kv, "asr.mmproj_path", c.mmproj_path);
+    // ★ 必须读 model_size：否则每次启动都是默认 "large"，设置里切小模型保存后
+    //   重启被无视 → 永远加载大模型（"切换模型根本无效"的根因）
+    c.model_size         = get_str(kv, "asr.model_size", c.model_size);
     c.n_threads          = get_int(kv, "asr.n_threads", c.n_threads);
     c.gpu_layers         = get_int(kv, "asr.gpu_layers", c.gpu_layers);
     c.n_batch            = get_int(kv, "asr.n_batch", c.n_batch);
@@ -205,7 +208,11 @@ Config Config::load(const std::string& path) {
     c.log_level          = get_int(kv, "log.log_level", c.log_level);
 
     // 模型路径：按 model_size 解析默认路径（用户自定义路径时保留）
-    if (c.model_size != "small") c.model_size = "large";
+    //   large=Qwen3-1.7B / small=Qwen3-0.6B（llama.cpp）
+    //   sensevoice=SenseVoice int8 / fast=流式 zipformer 双语（sherpa-onnx）
+    //   注：sherpa 引擎的 tokens.txt 复用 mmproj_path 字段存储
+    const bool is_sherpa = (c.model_size == "sensevoice" || c.model_size == "fast");
+    if (!is_sherpa && c.model_size != "small") c.model_size = "large";
     const bool is_large_default = (c.model_path.find("Qwen3-ASR-1.7B") != std::string::npos) ||
                                   (c.model_path == "model/Qwen3-ASR-1.7B-Q8_0.gguf");
     const bool is_small_default = (c.model_path.find("Qwen3-ASR-0.6B") != std::string::npos);
@@ -215,6 +222,14 @@ Config Config::load(const std::string& path) {
     } else if (c.model_size == "large" && (is_small_default || c.model_path.empty())) {
         c.model_path  = "model/Qwen3-ASR-1.7B-Q8_0.gguf";
         c.mmproj_path = "model/mmproj-Qwen3-ASR-1.7B-bf16.gguf";
+    } else if (c.model_size == "sensevoice" &&
+               c.model_path.find("sensevoice") == std::string::npos) {
+        c.model_path  = "model/sensevoice/model.int8.onnx";
+        c.mmproj_path = "model/sensevoice/tokens.txt";
+    } else if (c.model_size == "fast" &&
+               c.model_path.find("encoder") == std::string::npos) {
+        c.model_path  = "model/fast/encoder-epoch-99-avg-1.int8.onnx";
+        c.mmproj_path = "model/fast/tokens.txt";
     }
     return c;
 }

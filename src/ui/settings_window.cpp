@@ -22,7 +22,8 @@ enum {
 
     // 页2 识别
     IDC_VAD_THRESH = 1201, IDC_SILENCE, IDC_CHUNK, IDC_HOP,
-    IDC_MODEL_BIG, IDC_MODEL_SMALL, IDC_MODEL_INFO, IDC_MODEL_DL,
+    IDC_MODEL_BIG, IDC_MODEL_SMALL, IDC_MODEL_SV, IDC_MODEL_FAST,
+    IDC_MODEL_INFO, IDC_MODEL_DL,
 
     // 页3 音频
     IDC_DEVICE = 1301, IDC_REFRESH, IDC_MIC_TRACK, IDC_PC_TRACK,
@@ -154,10 +155,11 @@ void SettingsWindow::fill_fields() {
     set_edit(IDC_SILENCE, std::to_wstring(cfg_.silence_ms));
     set_edit(IDC_CHUNK, std::to_wstring(cfg_.chunk_ms));
     set_edit(IDC_HOP, std::to_wstring(cfg_.hop_ms));
-    if (cfg_.model_size == "small") {
-        CheckRadioButton(hwnd_, IDC_MODEL_BIG, IDC_MODEL_SMALL, IDC_MODEL_SMALL);
-    } else {
-        CheckRadioButton(hwnd_, IDC_MODEL_BIG, IDC_MODEL_SMALL, IDC_MODEL_BIG);
+    {
+        const int id = cfg_.model_size == "small"      ? IDC_MODEL_SMALL :
+                       cfg_.model_size == "sensevoice" ? IDC_MODEL_SV :
+                       cfg_.model_size == "fast"       ? IDC_MODEL_FAST : IDC_MODEL_BIG;
+        CheckRadioButton(hwnd_, IDC_MODEL_BIG, IDC_MODEL_FAST, id);
     }
 
     // 页3 音频
@@ -227,10 +229,26 @@ void SettingsWindow::read_fields() {
     cfg_.silence_ms        = edit_int(IDC_SILENCE, cfg_.silence_ms);
     cfg_.chunk_ms          = std::max(500, edit_int(IDC_CHUNK, cfg_.chunk_ms));
     cfg_.hop_ms            = std::max(200, std::min(cfg_.chunk_ms, edit_int(IDC_HOP, cfg_.hop_ms)));
-    if (IsDlgButtonChecked(hwnd_, IDC_MODEL_SMALL) == BST_CHECKED) {
-        cfg_.model_size = "small";
-    } else {
-        cfg_.model_size = "large";
+    // 四选一 + 同步默认路径，保持 config.ini 自洽（加载时也会按 model_size 修正兜底）
+    if      (IsDlgButtonChecked(hwnd_, IDC_MODEL_SMALL) == BST_CHECKED) {
+        cfg_.model_size  = "small";
+        cfg_.model_path  = "model/Qwen3-ASR-0.6B-Q8_0.gguf";
+        cfg_.mmproj_path = "model/mmproj-Qwen3-ASR-0.6B-bf16.gguf";
+    }
+    else if (IsDlgButtonChecked(hwnd_, IDC_MODEL_SV) == BST_CHECKED) {
+        cfg_.model_size  = "sensevoice";
+        cfg_.model_path  = "model/sensevoice/model.int8.onnx";
+        cfg_.mmproj_path = "model/sensevoice/tokens.txt";
+    }
+    else if (IsDlgButtonChecked(hwnd_, IDC_MODEL_FAST) == BST_CHECKED) {
+        cfg_.model_size  = "fast";
+        cfg_.model_path  = "model/fast/encoder-epoch-99-avg-1.int8.onnx";
+        cfg_.mmproj_path = "model/fast/tokens.txt";
+    }
+    else {
+        cfg_.model_size  = "large";
+        cfg_.model_path  = "model/Qwen3-ASR-1.7B-Q8_0.gguf";
+        cfg_.mmproj_path = "model/mmproj-Qwen3-ASR-1.7B-bf16.gguf";
     }
 
     // 页3 音频
@@ -370,7 +388,7 @@ void SettingsWindow::run() {
     RegisterClassExW(&wc);
 
     const int W = S(640);
-    const int btn_y = S(412);
+    const int btn_y = S(444);
     const int H = btn_y + S(40); // 内容 + 底部按钮 + 边距
     const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU |
                         WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX;
@@ -504,15 +522,21 @@ void SettingsWindow::run() {
     add_label(h, L"窗口步长(ms)", c1, row1(3));
     add_edit(h, IDC_HOP, c1e, row1(3));
     add_label(h, L"模型", c1, row1(4));
-    CreateWindowW(L"BUTTON", L"大模型 1.7B（更准）", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-                  c1e, row1(4), S(150), S(22), h, (HMENU)(INT_PTR)IDC_MODEL_BIG, hinst, nullptr);
-    CreateWindowW(L"BUTTON", L"小模型 0.6B（更快）", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-                  c1e + S(160), row1(4), S(150), S(22), h, (HMENU)(INT_PTR)IDC_MODEL_SMALL, hinst, nullptr);
-    add_hint(h, L"大≈2.8GB / 小≈1.1GB，保存后重启生效", c1e + EDIT_W() + S(8), row1(5));
+    // 四选一（两行）：大/小=Qwen3(llama)，均衡/极速=sherpa-onnx；保存后重启生效
+    CreateWindowW(L"BUTTON", L"精准 大模型1.7B", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+                  c1e, row1(4), S(170), S(22), h, (HMENU)(INT_PTR)IDC_MODEL_BIG, hinst, nullptr);
+    CreateWindowW(L"BUTTON", L"均衡 SenseVoice（推荐）", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+                  c1e + S(180), row1(4), S(200), S(22), h, (HMENU)(INT_PTR)IDC_MODEL_SV, hinst, nullptr);
+    CreateWindowW(L"BUTTON", L"轻量 小模型0.6B", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+                  c1e, row1(5), S(170), S(22), h, (HMENU)(INT_PTR)IDC_MODEL_SMALL, hinst, nullptr);
+    CreateWindowW(L"BUTTON", L"极速 流式zipformer", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+                  c1e + S(180), row1(5), S(200), S(22), h, (HMENU)(INT_PTR)IDC_MODEL_FAST, hinst, nullptr);
+    add_hint(h, L"均衡≈230MB中文最准 / 极速≈190MB最快 / 轻量≈1.1GB / 精准≈2.7GB，保存后重启生效",
+             c1e + EDIT_W() + S(8), row1(6));
     CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
-                  c1, row1(6), W - PAD() * 2 - c1, S(44), h, (HMENU)(INT_PTR)IDC_MODEL_INFO, hinst, nullptr);
+                  c1, row1(7), W - PAD() * 2 - c1, S(44), h, (HMENU)(INT_PTR)IDC_MODEL_INFO, hinst, nullptr);
     CreateWindowW(L"BUTTON", L"打开模型下载器", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                  c1, row1(7), S(160), S(26), h, (HMENU)(INT_PTR)IDC_MODEL_DL, hinst, nullptr);
+                  c1, row1(8), S(160), S(26), h, (HMENU)(INT_PTR)IDC_MODEL_DL, hinst, nullptr);
 
     // ================= 页3 音频（单列） =================
     g_cur_page = 2;

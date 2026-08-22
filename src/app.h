@@ -3,6 +3,7 @@
 // 采集线程×2 → VAD×2 → 分窗队列×2 → 单 ASR 线程串行识别 → 单个共享字幕窗口
 // （同一展示框整窗显示，两条字幕一般不同时开启，不做上下分割）
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -19,6 +20,7 @@
 #include "asr/vad.h"
 #include "asr/audio_queue.h"
 #include "asr/asr_engine.h"
+#include "asr/sherpa_engine.h"
 #include "asr/text_merge.h"
 #include "ui/subtitle_window.h"
 #include "ui/settings_window.h"
@@ -85,6 +87,9 @@ public:
     // 切换管线开关（托盘调用）
     void toggle_pipeline(AsrPipeline& p, bool enable);
 
+    // 模型切换确认重启（main.cpp 在进程干净退出后查询并拉起新实例）
+    bool restart_pending() const { return restart_pending_.load(); }
+
 private:
     // 采集回调（高频，运行在采集线程）
     void on_audio(AsrPipeline& p, const float* pcm, size_t n, int64_t t_ms);
@@ -112,7 +117,8 @@ private:
     SubtitleWindow window_;
 
     // 共享单引擎（显存一份），ASR 线程串行使用
-    AsrEngine asr_;
+    // 共享识别引擎：按 model_size 工厂创建（llama=Qwen3 / sherpa=SenseVoice、流式zipformer）
+    std::unique_ptr<IAsrEngine> asr_;
     std::mutex asr_mtx_;
 
     // 管线启停与 ASR 线程互斥：
@@ -135,6 +141,11 @@ private:
     // 当前运行中的模型大小（init 时记录；设置切换后提示重启生效）
     std::string running_model_size_;
 
+    // 模型切换确认重启：apply_config 里只置标记 + 退出设置窗嵌套循环，
+    // 主循环检测到标记后整体退出 → main() 干净退出（模型/GPU 已释放）
+    // 后再拉起新实例，避免"老进程不退 + 新实例同载模型"双实例冲突
+    std::atomic<bool> restart_pending_{false};
+
     // 日志
     FILE* log_file_ = nullptr;
     void logf(const char* fmt, ...);
@@ -144,9 +155,11 @@ private:
     // ASR 心跳
     std::atomic<int64_t> last_asr_heartbeat_ms_{0};
 
-    // 全屏检测（根本方案）：监听前台窗口变化事件，
-    // 全屏应用（播放器/浏览器/无边框游戏）出现瞬间立即把字幕窗口提到置顶层顶部
+    // 全屏检测（根本方案）：监听前台窗口变化 + 窗口位置/尺寸变化事件，
+    // 全屏应用（播放器/浏览器/游戏）出现或切全屏瞬间立即把字幕窗口提到置顶层顶部
+    // （游戏常"先窗口后切全屏"，前台不变只变尺寸 → 必须监听 LOCATIONCHANGE）
     HWINEVENTHOOK win_event_hook_ = nullptr;
+    HWINEVENTHOOK win_event_hook2_ = nullptr;
     static void CALLBACK on_foreground_event(HWINEVENTHOOK h, DWORD ev, HWND hwnd,
                                              LONG id, LONG cid, DWORD t, DWORD t2);
 
