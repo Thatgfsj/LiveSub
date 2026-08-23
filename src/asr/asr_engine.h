@@ -38,6 +38,10 @@ struct AsrEngineResult {
 
 class IAsrEngine {
 public:
+    // 引擎日志出口：GUI 程序 stderr 不可见 → 由 App 注入（写 livesub.log）
+    // 未设置时引擎自行 fprintf(stderr)
+    static void (*logger)(const char* msg);
+
     virtual ~IAsrEngine() = default;
     // 加载模型，失败返回 false 并填充 err
     virtual bool init(const AsrEngineParams& p, std::string* err = nullptr) = 0;

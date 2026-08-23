@@ -23,7 +23,25 @@ static void fatal(const std::string& msg) {
     MessageBoxW(nullptr, w.c_str(), L"LiveSub", MB_OK | MB_ICONERROR);
 }
 
+// 未处理异常捕获：崩溃现场写入 livesub.log（否则崩溃完全无痕，无法排查）
+// 注意：异常环境里尽量少做事（不 malloc 复杂结构），fopen/fprintf 直写
+static LONG WINAPI crash_handler(EXCEPTION_POINTERS* ep) {
+    FILE* f = fopen("crash.log", "ab");
+    if (f) {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        fprintf(f, "[%04d-%02d-%02d %02d:%02d:%02d] 崩溃 code=0x%08lX addr=%p\n",
+                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+                (unsigned long)ep->ExceptionRecord->ExceptionCode,
+                ep->ExceptionRecord->ExceptionAddress);
+        fclose(f);
+    }
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
 int main() {
+    SetUnhandledExceptionFilter(crash_handler);
+
     // 解析命令行（宽字符）
     std::string config_path = "config.ini";
     std::string wav_test;

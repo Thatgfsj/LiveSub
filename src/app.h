@@ -149,6 +149,8 @@ private:
     // 日志
     FILE* log_file_ = nullptr;
     void logf(const char* fmt, ...);
+    // 引擎日志桥接（注入 IAsrEngine::logger，写 livesub.log）
+    static void engine_log_bridge(const char* msg);
 
     int64_t last_level_ms_ = 0;
 

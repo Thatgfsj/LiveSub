@@ -39,15 +39,27 @@ void CALLBACK App::on_foreground_event(HWINEVENTHOOK, DWORD, HWND hwnd, LONG, LO
 }
 
 void App::logf(const char* fmt, ...) {
+    // 毫秒时间戳前缀：日志无时间是排查"什么时候慢/崩"的最大盲区
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    char line[4096];
+    int off = snprintf(line, sizeof(line), "[%02d:%02d:%02d.%03d] ",
+                       st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
     va_list args;
     va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
+    _vsnprintf_s(line + off, sizeof(line) - off, _TRUNCATE, fmt, args);
+    va_end(args);
+    fputs(line, stderr);
     if (log_file_) {
-        va_start(args, fmt);
-        vfprintf(log_file_, fmt, args);
+        fputs(line, log_file_);
         fflush(log_file_);
     }
-    va_end(args);
+}
+
+// 引擎日志桥接：sherpa/llama 引擎内部消息写入 livesub.log
+// （静态成员：可访问私有 logf；签名匹配 IAsrEngine::logger 函数指针）
+void App::engine_log_bridge(const char* msg) {
+    if (g_app) g_app->logf("%s\n", msg);
 }
 
 void App::update_tray(TrayIcon::State s, const std::string& tip) {
@@ -288,11 +300,18 @@ bool App::init(const std::string& config_path, bool enable_capture) {
     // 模型引擎（共享单实例）：按 model_size 选择实现
     //   sensevoice/fast → sherpa-onnx（SenseVoice 离线 / 流式 zipformer）
     //   large/small     → llama.cpp（Qwen3-ASR）
+    IAsrEngine::logger = &App::engine_log_bridge; // 引擎内部消息进 livesub.log
     if (cfg_.model_size == "sensevoice" || cfg_.model_size == "fast") {
         asr_ = std::make_unique<SherpaEngine>();
+        logf("[app] 引擎: sherpa-onnx (%s)\n",
+             cfg_.model_size == "fast" ? "流式zipformer" : "SenseVoice");
     } else {
         asr_ = std::make_unique<AsrEngine>();
+        logf("[app] 引擎: llama.cpp (Qwen3-%s, gpu_layers=%d, threads=%d)\n",
+             cfg_.model_size == "small" ? "0.6B" : "1.7B",
+             cfg_.gpu_layers, cfg_.n_threads);
     }
+    logf("[app] 模型: %s\n", cfg_.model_path.c_str());
 
     AsrEngineParams ap;
     ap.model_path   = resolve_path(cfg_.model_path);
@@ -463,9 +482,10 @@ bool App::process_pipeline(AsrPipeline& p) {
             // 定稿但无文本（噪音/气声）：不弹状态文字（避免屏幕蹦字），仅记日志
         }
         if (cfg_.log_level >= 1) {
-            logf("[%s] %s | total=%lldms%s\n", p.name.c_str(),
+            logf("[%s] %s | total=%lldms%s%s\n", p.name.c_str(),
                  r.text.empty() ? "(空)" : r.text.c_str(),
-                 (long long)cost, finalize ? " [FINAL]" : "");
+                 (long long)cost, finalize ? " [FINAL]" : "",
+                 cost > 2000 ? " [SLOW]" : "");
         }
     } else {
         if (&p == &mic_) p.window->set_status("识别错误: " + asr_->last_error());
