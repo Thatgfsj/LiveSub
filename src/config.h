@@ -17,7 +17,7 @@ struct Config {
     int   silence_ms        = 800;     // 句末静音提交时间
 
     // [asr]
-    std::string model_size  = "large";  // 模型大小：large=1.7B（更准/要求高） small=0.6B（更快/要求低）
+    std::string model_size  = "sensevoice"; // 新用户默认：均衡 SenseVoice（约230MB，中文最准）  // 模型大小：large=1.7B（更准/要求高） small=0.6B（更快/要求低）
     std::string model_path  = "model/Qwen3-ASR-1.7B-Q8_0.gguf";
     std::string mmproj_path = "model/mmproj-Qwen3-ASR-1.7B-bf16.gguf";
     int  n_threads          = 18;      // 推理线程数

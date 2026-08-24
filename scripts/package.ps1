@@ -33,8 +33,15 @@ if (Test-Path $Dist) { Remove-Item $Dist -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 New-Item -ItemType Directory -Force -Path "$Dist\model" | Out-Null
 
-# ---- 2. 复制主程序 ----
+# ---- 2. 复制主程序与模型下载器 ----
 Copy-Item $Exe $Dist
+$ModelDl = Join-Path $Root "build-mdl\model-dl.exe"
+if (Test-Path $ModelDl) {
+    Copy-Item $ModelDl $Dist
+    Write-Host "模型下载器: model-dl.exe" -ForegroundColor Green
+} else {
+    Write-Host "警告: 缺少 $ModelDl" -ForegroundColor Yellow
+}
 Write-Host "主程序: livesub.exe" -ForegroundColor Green
 
 # ---- 3. 复制运行时 DLL ----
@@ -88,9 +95,9 @@ min_speech_ms = 250
 silence_ms = 800
 
 [asr]
-model_size = large
-model_path = model\Qwen3-ASR-1.7B-Q8_0.gguf
-mmproj_path = model\mmproj-Qwen3-ASR-1.7B-bf16.gguf
+model_size = sensevoice
+model_path = model\sensevoice\model.int8.onnx
+mmproj_path = model\sensevoice	okens.txt
 n_threads = 18
 gpu_layers = 999
 n_batch = 256
@@ -140,7 +147,11 @@ log_level = 1
 
 # ---- 6. 使用说明 ----
 $readme = @"
-LiveSub 直播实时字幕（本地 Qwen3-ASR）
+LiveSub 直播实时字幕（本地语音识别，四种引擎可选）
+
+【模型】首次启动会引导下载，推荐"均衡 SenseVoice"（约 230MB，中文最准）。
+其他选项：极速 流式zipformer（约190MB最快）/ 轻量 Qwen3-0.6B / 精准 Qwen3-1.7B。
+切换：托盘双击打开设置 → 识别页选择 → 重启生效。
 
 【使用】
 1. 双击 livesub.exe 启动（无窗口，右下角托盘出现图标）
