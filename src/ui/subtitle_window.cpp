@@ -285,10 +285,8 @@ void SubtitleWindow::render() {
                     bg_brush_);
             };
             fill_bg(bg1_left_, bg1_top_, bg1_right_, bg1_bot_);
-            // 布局失败兜底：整窗文本（仅非常规路径）
-            if (bg1_bot_ <= bg1_top_ && !full.empty() && text_format_) {
-                fill_bg(0, 0, (float)dib_w_, (float)dib_h_);
-            }
+            // 布局失败时不再兜底铺满整窗（会把显示区撑到半个屏幕）；
+            // 背景缺失仅影响这一帧的观感，下一帧布局恢复后自动正常
         }
 
         if (layout_) {

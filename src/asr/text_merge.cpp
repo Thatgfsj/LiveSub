@@ -166,6 +166,30 @@ std::string TextMerger::update(const std::string& new_text, bool finalize, int64
     return current();
 }
 
+std::string TextMerger::update_streaming(const std::string& full_text, bool finalize,
+                                         int64_t now_ms) {
+    if (finalize) {
+        confirmed_.clear();
+        prev_result_.clear();
+        prev_interim_.clear();
+        if (!full_text.empty() && !is_filler(full_text) &&
+            (sentences_.empty() || sentences_.back().text != full_text)) {
+            sentences_.push_back({full_text, now_ms});
+            if ((int)sentences_.size() > max_history_) {
+                sentences_.erase(sentences_.begin(),
+                                 sentences_.begin() + (sentences_.size() - max_history_));
+            }
+        }
+        current_.clear();
+        return current();
+    }
+    // 部分结果：幻觉不显示；与上一句完全相同（段尾重复识别）不显示
+    if (is_filler(full_text)) return current();
+    if (!sentences_.empty() && full_text == sentences_.back().text) return current();
+    current_ = full_text; // 流式结果前缀稳定，直接整体替换（无回退）
+    return current();
+}
+
 std::string TextMerger::current() const {
     // 恒定显示结构（无补丁逻辑）：
     //   最近 (max_lines_-1) 句定稿 + 当前句（interim 打字机）

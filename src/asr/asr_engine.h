@@ -51,6 +51,20 @@ public:
     virtual int sample_rate() const = 0;
     virtual bool ready() const = 0;
     virtual const std::string& last_error() const = 0;
+
+    // ---- 真流式支持（可选，流式 zipformer 实现）----
+    // 一个 VAD 段一个会话：持续喂增量音频，识别结果前缀稳定（只追加不回退），
+    // 替代"增长窗口重解 + Local Agreement"模式（该模式对长句会产生
+    // 尾部反复横跳与重复字，且 interim 越来越长撑大显示区）
+    virtual bool supports_streaming() const { return false; }
+    // 段开始：创建解码会话（失败返回 false）
+    virtual bool stream_begin() { return false; }
+    // 喂增量样本（16kHz PCM）
+    virtual void stream_feed(const float* pcm, size_t n) { (void)pcm; (void)n; }
+    // 取当前累积识别文本（内部解码到最新；返回空串表示尚无内容）
+    virtual std::string stream_fetch() { return ""; }
+    // 段结束：收尾解码并返回最终文本，随后会话自动关闭
+    virtual std::string stream_finalize() { return ""; }
 };
 
 // llama.cpp + libmtmd 实现（Qwen3-ASR）

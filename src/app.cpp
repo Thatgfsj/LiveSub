@@ -382,9 +382,93 @@ void App::on_audio(AsrPipeline& p, const float* pcm, size_t n, int64_t t_ms) {
 // ---------------------------------------------------------------------------
 // ASR 线程：单引擎串行处理两条管线
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 真流式管线（流式 zipformer 专用）
+//   VAD 段开始建会话 → 每个 hop 喂增量音频 → 取累积文本直接显示；
+//   段结束收尾解码取完整句入历史。interim 用 token 时间戳截尾（引擎内 8s）
+// ---------------------------------------------------------------------------
+bool App::process_pipeline_streaming(AsrPipeline& p) {
+    const int64_t t_now = now_ms();
+    const bool finalize = p.finalize_pending.exchange(false);
+    if (!p.enabled.load() || !p.queue) {
+        if (finalize) p.finalize_pending = true; // 恢复标志，稍后处理
+        return false;
+    }
+    if (!p.speaking.load() && !finalize) {
+        last_asr_heartbeat_ms_ = t_now;
+        return false;
+    }
+
+    // 段开始：清空上一句 + 建流式会话（clear_merger 由 VAD 回调置位）
+    if (p.clear_merger.exchange(false)) {
+        p.merger.clear();
+        p.stream_fed = p.seg_start.load();
+        asr_->stream_begin();
+    }
+
+    // 数据增量不足一个 hop → 跳过
+    const size_t total_now = p.queue->total_samples();
+    const size_t hop_samples = (size_t)asr_->sample_rate() * cfg_.hop_ms / 1000;
+    if (!finalize && total_now - p.last_processed.load() < hop_samples) {
+        last_asr_heartbeat_ms_ = t_now;
+        return false;
+    }
+
+    // 喂增量音频（上次喂到的位置 → 当前；finalize 时喂完剩余全部）
+    const size_t max_len = (size_t)asr_->sample_rate() * 30;
+    size_t fed = p.stream_fed.load();
+    size_t n = 0;
+    while (fed < total_now) {
+        n = p.queue->take_segment(fed, total_now, max_len, p.win_buf);
+        if (n == 0) break;
+        asr_->stream_feed(p.win_buf.data(), n);
+        fed += n;
+        p.stream_fed = fed;
+    }
+    p.last_processed = total_now;
+
+    // 当前累积文本 → 直接显示
+    const int64_t t0 = now_ms();
+    const std::string text = asr_->stream_fetch();
+    const int64_t cost = now_ms() - t0;
+    if (!text.empty()) {
+        const std::string full = p.merger.update_streaming(text, false, t_now);
+        p.window->set_text(full);
+        p.output.update(full, std::string());
+        if (cfg_.log_level >= 1) {
+            logf("[%s] %s | total=%lldms%s\n", p.name.c_str(), text.c_str(),
+                 (long long)cost, cost > 2000 ? " [SLOW]" : "");
+        }
+    }
+    last_asr_heartbeat_ms_ = now_ms();
+
+    // 定稿：段结束 → 收尾解码，完整句入历史/记录文件
+    if (finalize) {
+        const std::string final_text = asr_->stream_finalize();
+        const std::string full = p.merger.update_streaming(final_text, true, t_now);
+        p.window->set_text(full);
+        if (!final_text.empty()) {
+            p.output.update(full, final_text);
+            p.output.append_record(final_text);
+            if (&p == &mic_ && voice_input_.enabled()) {
+                voice_input_.commit_text(final_text + " ");
+            }
+            if (cfg_.log_level >= 1) {
+                logf("[%s] %s | [FINAL]\n", p.name.c_str(), final_text.c_str());
+            }
+        }
+    }
+    return n > 0;
+}
+
 bool App::process_pipeline(AsrPipeline& p) {
     // 与 stop_pipeline/start_pipeline 互斥：防止 ASR 线程使用 queue/vad 时被并发 delete
     std::lock_guard<std::mutex> plk(pipeline_mtx_);
+    // 真流式引擎（流式 zipformer）走专用管线：持续喂增量音频，
+    // 结果前缀稳定 → 无增长窗口重解、无 Local Agreement（无重复字/尾部回跳）
+    if (asr_->supports_streaming()) {
+        return process_pipeline_streaming(p);
+    }
     // 新段开始：清空上一句（每段只显示当前句，行数恒定）
     if (p.clear_merger.exchange(false)) {
         p.merger.clear();

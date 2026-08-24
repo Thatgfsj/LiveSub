@@ -17,6 +17,10 @@ public:
     //   now_ms 用于记录句子时间（滚动缓冲用），传 0 表示不记录
     std::string update(const std::string& new_text, bool finalize, int64_t now_ms = 0);
 
+    // 真流式引擎专用（流式 zipformer）：结果前缀稳定、只追加，
+    // 直接作为当前句显示，不走 Local Agreement（那是增长窗口重解模式的逻辑）
+    std::string update_streaming(const std::string& full_text, bool finalize, int64_t now_ms = 0);
+
     // Local Agreement（whisper_streaming）：当前句已确认部分的字符数
     size_t confirmed_chars() const { return confirmed_.size(); }
 
