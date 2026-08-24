@@ -651,7 +651,11 @@ void App::apply_config() {
 
     // 模型大小切换：需要重启才生效 → 提示，确认则自动重启，取消则不重启
     if (cfg_.model_size != running_model_size_ && !model_missing) {
-        const wchar_t* which = (cfg_.model_size == "small") ? L"小模型（0.6B）" : L"大模型（1.7B）";
+        const wchar_t* which =
+            cfg_.model_size == "small"      ? L"轻量 小模型（Qwen3-0.6B）" :
+            cfg_.model_size == "sensevoice" ? L"均衡 SenseVoice" :
+            cfg_.model_size == "fast"       ? L"极速 流式zipformer" :
+                                              L"精准 大模型（Qwen3-1.7B）";
         const std::wstring msg = std::wstring(L"模型已切换为") + which +
             L"，重启应用后生效。\n\n是否立即重启？";
         const int ret = MessageBoxW(nullptr, msg.c_str(), L"LiveSub 模型切换",
