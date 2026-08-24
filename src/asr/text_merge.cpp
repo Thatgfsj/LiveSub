@@ -191,12 +191,22 @@ std::string TextMerger::update_streaming(const std::string& full_text, bool fina
 }
 
 std::string TextMerger::current() const {
-    // 恒定显示结构（无补丁逻辑）：
+    // 恒定显示结构：
     //   最近 (max_lines_-1) 句定稿 + 当前句（interim 打字机）
     //   说话时 2 行（上一句 + 当前句），停顿时 1 行（上一句）——行结构稳定不跳变
+    //   例外：上一句与当前句高度重复（口播复述/重叠转写）→ 不再显示上一句，
+    //   否则两行几乎一样，看起来像字幕坏了
     const size_t keep = (size_t)std::max(1, max_lines_ - 1);
     std::string s;
-    const size_t from = sentences_.size() > keep ? sentences_.size() - keep : 0;
+    size_t from = sentences_.size() > keep ? sentences_.size() - keep : 0;
+    if (!current_.empty() && from < sentences_.size()) {
+        const std::string prev_p = strip_punct(sentences_.back().text);
+        const std::string cur_p = strip_punct(current_);
+        if (!prev_p.empty()) {
+            const size_t cp = common_prefix_len(prev_p, cur_p);
+            if (cp * 100 >= prev_p.size() * 60) from = sentences_.size(); // 高度重复：跳过上一句
+        }
+    }
     for (size_t i = from; i < sentences_.size(); i++) {
         if (!s.empty()) s += "\n";
         s += sentences_[i].text;
