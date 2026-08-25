@@ -192,6 +192,13 @@ bool App::start_pipeline(AsrPipeline& p, bool is_mic, bool start_capture) {
 void App::stop_pipeline(AsrPipeline& p) {
     std::lock_guard<std::mutex> plk(pipeline_mtx_);
     p.enabled = false;
+    // 流式会话未收尾（托盘关管线/切配置时段还在）→ 收尾释放，
+    // 否则 OnlineStream 泄漏（引擎侧无单独的丢弃接口，finalize 即销毁）
+    if (p.stream_sess && asr_->supports_streaming()) {
+        asr_->stream_finalize(p.stream_sess);
+        p.stream_sess = nullptr;
+    }
+    p.stream_fed = 0;
     if (p.queue) p.queue->stop();
     p.capture.stop(); // 先停采集线程（VAD 回调随之停止）
     // 采集线程已停（capture.stop 内部 join），此时置空 window 指针安全
@@ -407,9 +414,19 @@ bool App::process_pipeline_streaming(AsrPipeline& p) {
 
     const size_t total_now = p.queue->total_samples();
 
-    // 1. 旧段定稿：喂完剩余 → 收尾解码 → 完整句入历史/记录文件
+    // 喂入上限：VAD 已标记下一个段起点（尚未开处理）时，旧会话最多喂到那里——
+    // 否则旧段定稿轮会把新段开头的音频一并吃掉（新句丢首字）
+    size_t feed_limit = total_now;
+    {
+        const size_t next_start = p.seg_start.load();
+        if (next_start > p.last_processed.load() && next_start <= total_now) {
+            feed_limit = next_start;
+        }
+    }
+
+    // 1. 旧段定稿：喂完剩余（不越过新段起点）→ 收尾解码 → 完整句入历史/记录文件
     if (finalize) {
-        feed_pending_audio(p, total_now);
+        feed_pending_audio(p, feed_limit);
         const int64_t t0 = now_ms();
         const std::string final_text = asr_->stream_finalize(p.stream_sess);
         p.stream_sess = nullptr;
@@ -445,11 +462,12 @@ bool App::process_pipeline_streaming(AsrPipeline& p) {
         return false;
     }
 
-    // 4. 喂增量音频（上次喂到的位置 → 当前）。
-    //    max_len 必须为 0：take_segment 的截断语义是"保留末尾"（起点前移），
-    //    若触发截断还按 fed += n 推进会把同一段音频重复喂给引擎（字幕叠字）；
-    //    改为按固定块精确取 [fed, fed+want)，不依赖截断语义
-    const size_t fed_now = feed_pending_audio(p, total_now);
+    // 4. 喂增量音频（上次喂到的位置 → 当前；新段未开处理时同样受 feed_limit
+    //    约束）。max_len 必须为 0：take_segment 的截断语义是"保留末尾"（起点
+    //    前移），若触发截断还按 fed += n 推进会把同一段音频重复喂给引擎
+    //    （字幕叠字）；改为按固定块精确取 [fed, fed+want)，不依赖截断语义。
+    //    本轮已开新段（stream_fed 已对齐 seg_start）→ 不再限制，立即喂新段
+    const size_t fed_now = feed_pending_audio(p, new_segment ? total_now : feed_limit);
 
     // 5. 当前累积文本 → 直接显示（会话被竞态关闭时 fetch 返回空，安全）
     const int64_t t0 = now_ms();
@@ -483,7 +501,10 @@ size_t App::feed_pending_audio(AsrPipeline& p, size_t total_now) {
         p.stream_fed = fed;
         if (n < want) break; // 取不满（缓冲覆盖等异常）→ 停止，避免重复喂
     }
-    p.last_processed = std::max(p.last_processed.load(), total_now);
+    // last_processed 推进到实际喂到的位置（而非 total_now）：
+    // 受 feed_limit 限制未喂满时，剩余部分留给新段/下一轮，
+    // 若虚报推进会让 hop 检查与喂入上限计算失真
+    p.last_processed = std::max(p.last_processed.load(), fed);
     return total_fed;
 }
 

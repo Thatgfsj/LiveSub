@@ -70,7 +70,11 @@ void Vad::feed_frame(const float* pcm, int64_t frame_t) {
             if (speech_candidate_ms_ < 0) speech_candidate_ms_ = frame_t;
             if (frame_t - speech_candidate_ms_ >= p_.min_speech_ms) {
                 in_speech_ = true;
-                speech_start_ms_ = speech_candidate_ms_;
+                // pre-roll 回退 250ms：candidate 之前的低能量部分恰是首字的
+                // 辅音/轻声起始，不回退会导致每句开头丢字（音频在环形缓冲
+                // 容量内，回退的样本仍可取到）
+                speech_start_ms_ = std::max((int64_t)0,
+                                            speech_candidate_ms_ - 250);
                 last_voice_ms_ = frame_t;
                 if (on_speech_start) on_speech_start(speech_start_ms_);
             }
