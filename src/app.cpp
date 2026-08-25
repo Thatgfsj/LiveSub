@@ -390,46 +390,70 @@ void App::on_audio(AsrPipeline& p, const float* pcm, size_t n, int64_t t_ms) {
 bool App::process_pipeline_streaming(AsrPipeline& p) {
     const int64_t t_now = now_ms();
     const bool finalize = p.finalize_pending.exchange(false);
+    // 新段标志先取出暂存：处理顺序必须"先收尾旧段，再开新段"——
+    // 若同轮先 stream_begin 新会话、末尾又执行旧段的 finalize，
+    // 会把新会话误收尾 → 后续音频喂进已关闭的会话 → 字幕错乱叠字
+    const bool new_segment = p.clear_merger.exchange(false);
     if (!p.enabled.load() || !p.queue) {
         if (finalize) p.finalize_pending = true; // 恢复标志，稍后处理
+        if (new_segment) p.clear_merger = true;
         return false;
     }
     if (!p.speaking.load() && !finalize) {
         last_asr_heartbeat_ms_ = t_now;
+        if (new_segment) p.clear_merger = true; // 保留，等 speaking 恢复
         return false;
     }
 
-    // 段开始：清空上一句 + 建流式会话（clear_merger 由 VAD 回调置位）
-    if (p.clear_merger.exchange(false)) {
-        p.merger.clear();
-        p.stream_fed = p.seg_start.load();
-        asr_->stream_begin();
+    const size_t total_now = p.queue->total_samples();
+
+    // 1. 旧段定稿：喂完剩余 → 收尾解码 → 完整句入历史/记录文件
+    if (finalize) {
+        feed_pending_audio(p, total_now);
+        const int64_t t0 = now_ms();
+        const std::string final_text = asr_->stream_finalize(p.stream_sess);
+        p.stream_sess = nullptr;
+        const int64_t cost = now_ms() - t0;
+        const std::string full = p.merger.update_streaming(final_text, true, t_now);
+        p.window->set_text(full);
+        if (!final_text.empty()) {
+            p.output.update(full, final_text);
+            p.output.append_record(final_text);
+            if (&p == &mic_ && voice_input_.enabled()) {
+                voice_input_.commit_text(final_text + " ");
+            }
+            if (cfg_.log_level >= 1) {
+                logf("[%s] %s | [FINAL]%s\n", p.name.c_str(), final_text.c_str(),
+                     cost > 2000 ? " [SLOW]" : "");
+            }
+        }
     }
 
-    // 数据增量不足一个 hop → 跳过
-    const size_t total_now = p.queue->total_samples();
+    // 2. 新段开始：清空上一句 + 建流式会话
+    if (new_segment) {
+        p.merger.clear();
+        // VAD 分段可能重叠（speech_start 回退保首字，新段起点落在上一段尾部）：
+        // 重叠部分上一句已识别过，从上一段喂完的位置继续，避免重复识别（字幕叠字）
+        p.stream_fed = std::max(p.seg_start.load(), p.stream_fed.load());
+        p.stream_sess = asr_->stream_begin();
+    }
+
+    // 3. 数据增量不足一个 hop → 跳过
     const size_t hop_samples = (size_t)asr_->sample_rate() * cfg_.hop_ms / 1000;
     if (!finalize && total_now - p.last_processed.load() < hop_samples) {
         last_asr_heartbeat_ms_ = t_now;
         return false;
     }
 
-    // 喂增量音频（上次喂到的位置 → 当前；finalize 时喂完剩余全部）
-    const size_t max_len = (size_t)asr_->sample_rate() * 30;
-    size_t fed = p.stream_fed.load();
-    size_t n = 0;
-    while (fed < total_now) {
-        n = p.queue->take_segment(fed, total_now, max_len, p.win_buf);
-        if (n == 0) break;
-        asr_->stream_feed(p.win_buf.data(), n);
-        fed += n;
-        p.stream_fed = fed;
-    }
-    p.last_processed = total_now;
+    // 4. 喂增量音频（上次喂到的位置 → 当前）。
+    //    max_len 必须为 0：take_segment 的截断语义是"保留末尾"（起点前移），
+    //    若触发截断还按 fed += n 推进会把同一段音频重复喂给引擎（字幕叠字）；
+    //    改为按固定块精确取 [fed, fed+want)，不依赖截断语义
+    const size_t fed_now = feed_pending_audio(p, total_now);
 
-    // 当前累积文本 → 直接显示
+    // 5. 当前累积文本 → 直接显示（会话被竞态关闭时 fetch 返回空，安全）
     const int64_t t0 = now_ms();
-    const std::string text = asr_->stream_fetch();
+    const std::string text = asr_->stream_fetch(p.stream_sess);
     const int64_t cost = now_ms() - t0;
     if (!text.empty()) {
         const std::string full = p.merger.update_streaming(text, false, t_now);
@@ -441,24 +465,26 @@ bool App::process_pipeline_streaming(AsrPipeline& p) {
         }
     }
     last_asr_heartbeat_ms_ = now_ms();
+    return fed_now > 0 || finalize;
+}
 
-    // 定稿：段结束 → 收尾解码，完整句入历史/记录文件
-    if (finalize) {
-        const std::string final_text = asr_->stream_finalize();
-        const std::string full = p.merger.update_streaming(final_text, true, t_now);
-        p.window->set_text(full);
-        if (!final_text.empty()) {
-            p.output.update(full, final_text);
-            p.output.append_record(final_text);
-            if (&p == &mic_ && voice_input_.enabled()) {
-                voice_input_.commit_text(final_text + " ");
-            }
-            if (cfg_.log_level >= 1) {
-                logf("[%s] %s | [FINAL]\n", p.name.c_str(), final_text.c_str());
-            }
-        }
+// 流式管线：把 [stream_fed, total) 的增量音频喂给引擎（分块精确取，不重复不遗漏）
+size_t App::feed_pending_audio(AsrPipeline& p, size_t total_now) {
+    const size_t feed_block = (size_t)asr_->sample_rate() * 5;
+    size_t fed = p.stream_fed.load();
+    size_t total_fed = 0;
+    while (fed < total_now) {
+        const size_t want = std::min(feed_block, total_now - fed);
+        const size_t n = p.queue->take_segment(fed, fed + want, 0, p.win_buf);
+        if (n == 0) break;
+        asr_->stream_feed(p.stream_sess, p.win_buf.data(), n);
+        fed += n;
+        total_fed += n;
+        p.stream_fed = fed;
+        if (n < want) break; // 取不满（缓冲覆盖等异常）→ 停止，避免重复喂
     }
-    return n > 0;
+    p.last_processed = std::max(p.last_processed.load(), total_now);
+    return total_fed;
 }
 
 bool App::process_pipeline(AsrPipeline& p) {

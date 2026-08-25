@@ -132,7 +132,6 @@ void SubtitleWindow::release_d2d() {
     if (layout_)         { layout_->Release();         layout_         = nullptr; }
     if (text_format_)    { text_format_->Release();    text_format_    = nullptr; }
     if (text_brush_)     { text_brush_->Release();     text_brush_     = nullptr; }
-    if (interim_brush_)  { interim_brush_->Release();  interim_brush_  = nullptr; }
     if (stroke_brush_)   { stroke_brush_->Release();   stroke_brush_   = nullptr; }
     if (bg_brush_)       { bg_brush_->Release();       bg_brush_       = nullptr; }
     if (target_)         { target_->Release();         target_         = nullptr; }
@@ -171,16 +170,9 @@ void SubtitleWindow::apply_style() {
                              (style_.font_color & 0xFF) / 255.0f,
                              (style_.font_color >> 24 & 0xFF) / 255.0f),
                 &text_brush_);
-            // interim（未确认尾部）：与已确认文本同色（白色实色）
-            // 灰色/半透明在深色背景上对比度低，看起来模糊；
-            // 用户不需要"未确认"的视觉区分，统一白色最清晰
-            target_->CreateSolidColorBrush(
-                D2D1::ColorF((style_.font_color >> 16 & 0xFF) / 255.0f,
-                             (style_.font_color >> 8 & 0xFF) / 255.0f,
-                             (style_.font_color & 0xFF) / 255.0f,
-                             (style_.font_color >> 24 & 0xFF) / 255.0f),
-                &interim_brush_);
             // 描边色（艺术字效果，默认黑）
+            // （interim 与已确认文本同色，无需单独 brush / DrawingEffect——
+            //   DrawingEffect 会连带把描边层染成同色，导致白字白边）
             target_->CreateSolidColorBrush(
                 D2D1::ColorF((style_.stroke_color >> 16 & 0xFF) / 255.0f,
                              (style_.stroke_color >> 8 & 0xFF) / 255.0f,
@@ -222,7 +214,10 @@ void SubtitleWindow::render() {
             need_paint = true; // 动画进行中
         }
     }
-    if (layout_dirty_.exchange(false)) need_paint = true; // 文本变化
+    // 文本变化只 exchange 一次（此前两处 exchange 互相吃掉标志 →
+    // rebuild_layout 永不执行 → 永远走无描边 fallback，字幕纯白）
+    const bool content_changed = layout_dirty_.exchange(false);
+    if (content_changed) need_paint = true;
     if (!need_paint) {
         // 完全静止：关掉定时器，主线程不再被唤醒（直到下次内容变化）
         if (timer_) {
@@ -261,8 +256,8 @@ void SubtitleWindow::render() {
         }
     }
 
-    // 3. 布局（文本变化时重建）
-    if (layout_dirty_.exchange(false)) {
+    // 3. 布局（文本变化时重建；标志已在开头 exchange，此处复用结果）
+    if (content_changed) {
         rebuild_layout(full, (float)dib_w_, (float)dib_h_);
     }
 
@@ -314,7 +309,6 @@ void SubtitleWindow::set_text(const std::string& text, size_t confirmed_offset) 
     {
         std::lock_guard<std::mutex> lk(mtx_);
         content_ = to_wide(text);
-        confirmed_offset_ = confirmed_offset; // 与 content_ 同锁，避免与渲染线程竞争
     }
     layout_dirty_ = true;
     ensure_timer(); // 唤醒重绘（静止时定时器已关）
@@ -392,7 +386,6 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
         size *= 0.92f;
     }
     if (lines <= max) {
-        apply_interim_style(l, effective, base_skip);
         record_bg(l);
         layout_ = l;
         return; // 滚动状态保留（粘滞：即使本次不超行也不回退）
@@ -414,7 +407,6 @@ void SubtitleWindow::rebuild_layout(const std::wstring& text, float w, float h) 
     if (l) {
         DWRITE_TEXT_RANGE range = {0, (UINT32)effective.size() - skip_chars};
         l->SetFontSize(size, range);
-        apply_interim_style(l, effective.substr(skip_chars), base_skip + skip_chars);
     }
     record_bg(l);
     layout_ = l;
@@ -433,24 +425,14 @@ void SubtitleWindow::draw_layout(IDWriteTextLayout* l, float x, float y, bool st
             {-sw, 0}, {sw, 0}, {0, -sw}, {0, sw},
             {-sw, -sw}, {sw, -sw}, {-sw, sw}, {sw, sw},
         };
+        // 描边层禁用 CLIP：CLIP 按文本排版矩形裁剪，偏移出去的描边（恰是
+        // 描边的全部可见部分）会被裁光 → 字幕变纯白。主体保留 CLIP 防溢出
         for (auto& o : offs) {
             target_->DrawTextLayout(D2D1::Point2F(x + o[0], y + o[1]), l,
-                                    stroke_brush_, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                                    stroke_brush_, D2D1_DRAW_TEXT_OPTIONS_NONE);
         }
     }
     target_->DrawTextLayout(D2D1::Point2F(x, y), l, text_brush_, D2D1_DRAW_TEXT_OPTIONS_CLIP);
-}
-
-// interim（未确认尾部）半透明样式：confirmed 偏移之后的部分
-// base_offset：滚动后显示文本相对原始文本的偏移（confirmed_offset 需换算）
-void SubtitleWindow::apply_interim_style(IDWriteTextLayout* l, const std::wstring& t,
-                                         size_t base_offset) {
-    if (!l || !interim_brush_ || confirmed_offset_ == std::string::npos) return;
-    if (confirmed_offset_ > base_offset && confirmed_offset_ - base_offset < t.size()) {
-        DWRITE_TEXT_RANGE range = {(UINT32)(confirmed_offset_ - base_offset),
-                                   (UINT32)(t.size() - (confirmed_offset_ - base_offset))};
-        l->SetDrawingEffect(interim_brush_, range);
-    }
 }
 
 std::wstring SubtitleWindow::to_wide(const std::string& s) const {

@@ -56,15 +56,17 @@ public:
     // 一个 VAD 段一个会话：持续喂增量音频，识别结果前缀稳定（只追加不回退），
     // 替代"增长窗口重解 + Local Agreement"模式（该模式对长句会产生
     // 尾部反复横跳与重复字，且 interim 越来越长撑大显示区）
+    // 会话以句柄隔离：麦克风/电脑声音两条管线各自持有会话，互不干扰
+    // （引擎内仅一个解码器但支持多 stream 并存，单 ASR 线程串行调用）
     virtual bool supports_streaming() const { return false; }
-    // 段开始：创建解码会话（失败返回 false）
-    virtual bool stream_begin() { return false; }
+    // 段开始：创建解码会话，返回会话句柄（失败返回 nullptr）
+    virtual void* stream_begin() { return nullptr; }
     // 喂增量样本（16kHz PCM）
-    virtual void stream_feed(const float* pcm, size_t n) { (void)pcm; (void)n; }
+    virtual void stream_feed(void* sess, const float* pcm, size_t n) { (void)sess; (void)pcm; (void)n; }
     // 取当前累积识别文本（内部解码到最新；返回空串表示尚无内容）
-    virtual std::string stream_fetch() { return ""; }
+    virtual std::string stream_fetch(void* sess) { (void)sess; return ""; }
     // 段结束：收尾解码并返回最终文本，随后会话自动关闭
-    virtual std::string stream_finalize() { return ""; }
+    virtual std::string stream_finalize(void* sess) { (void)sess; return ""; }
 };
 
 // llama.cpp + libmtmd 实现（Qwen3-ASR）

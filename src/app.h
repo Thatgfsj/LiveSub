@@ -52,6 +52,9 @@ struct AsrPipeline {
     std::atomic<size_t> last_processed{0};
     // 真流式会话（流式 zipformer）：本段已喂到引擎的样本位置
     std::atomic<size_t> stream_fed{0};
+    // 本管线的流式会话句柄（OnlineStream*，引擎返回；段结束 finalize 后置空）。
+    // 麦克风/电脑声音两条管线各持一个会话，避免共用单会话互相抢夺（字幕叠字）
+    void* stream_sess = nullptr;
     // 新段开始清空上一句（避免"定稿句+新句"混存导致行数问题）；
     // 采集线程只置标志，ASR 线程处理（避免跨线程直接操作 merger）
     std::atomic<bool> clear_merger{false};
@@ -100,6 +103,8 @@ private:
     void asr_loop();
     // 真流式管线（流式 zipformer）：持续喂增量音频，无窗口重解
     bool process_pipeline_streaming(AsrPipeline& p);
+    // 流式喂增量音频：[stream_fed, total) 分块精确取，返回本次喂入样本数
+    size_t feed_pending_audio(AsrPipeline& p, size_t total_now);
     // 处理一条管线的当前窗口；返回是否识别了一窗
     bool process_pipeline(AsrPipeline& p);
     // 管线启停（start_capture=false 时只建识别链不采集，供 wav 测试）

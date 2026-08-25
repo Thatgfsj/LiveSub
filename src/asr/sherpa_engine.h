@@ -6,6 +6,8 @@
 //     SenseVoice 直接解码；zipformer 新建 stream→feed→收尾→取结果
 #include "asr_engine.h"
 
+#include "sherpa-onnx-c-api.h"
+
 class SherpaEngine : public IAsrEngine {
 public:
     SherpaEngine() = default;
@@ -21,17 +23,17 @@ public:
     bool ready() const override { return initialized_; }
     const std::string& last_error() const override { return last_err_; }
 
-    // 真流式（仅流式 zipformer；SenseVoice 离线不支持）
+    // 真流式（仅流式 zipformer；SenseVoice 离线不支持）。
+    // 会话句柄 = OnlineStream*：两条管线可同时各持一个会话并行识别
     bool supports_streaming() const override { return online_; }
-    bool stream_begin() override;
-    void stream_feed(const float* pcm, size_t n) override;
-    std::string stream_fetch() override;
-    std::string stream_finalize() override;
+    void* stream_begin() override;
+    void stream_feed(void* sess, const float* pcm, size_t n) override;
+    std::string stream_fetch(void* sess) override;
+    std::string stream_finalize(void* sess) override;
 
 private:
     void* dll_ = nullptr;          // sherpa-onnx-c-api.dll 模块句柄
     void* recognizer_ = nullptr;   // OfflineRecognizer* 或 OnlineRecognizer*
-    void* stream_ = nullptr;       // OnlineStream*（流式会话期间非空）
     bool online_ = false;          // true=流式 zipformer / false=SenseVoice 离线
     bool initialized_ = false;
     int n_threads_ = 4;
@@ -41,7 +43,8 @@ private:
     // 按模型路径判断模式：含 "encoder" → 流式 zipformer；否则按 SenseVoice 离线
     static bool is_online_path(const std::string& model_path);
     void log(const std::string& msg) const;
-    // 解码到没有新结果可出，返回当前文本（用 token 时间戳截尾保留最近 8s，
-    // 防止长句累积撑爆字幕区）
-    std::string decode_and_text();
+    // 解码指定会话到没有新结果可出，返回当前文本（用 token 时间戳截尾保留
+    // 最近 8s，防止长句累积撑爆字幕区）
+    std::string decode_and_text(const SherpaOnnxOnlineRecognizer* rec,
+                                const SherpaOnnxOnlineStream* st);
 };

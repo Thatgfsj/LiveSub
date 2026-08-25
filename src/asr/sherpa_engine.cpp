@@ -199,28 +199,27 @@ void SherpaEngine::free() {
 
 // ---------------------------------------------------------------------------
 // 真流式会话（流式 zipformer）：一个 VAD 段一个 stream，持续喂增量音频。
-// 结果用 token 时间戳截尾保留最近 8 秒——transducer 输出是整段累积文本，
-// 不截尾会让字幕 interim 越来越长、撑爆显示区
+// 会话句柄 = OnlineStream*，麦克风/电脑声音两条管线各持会话并行识别
+// （recognizer 单 ASR 线程串行使用，stream 之间状态独立）。
+// interim 结果用 token 时间戳截尾保留最近 8 秒——transducer 输出是整段
+// 累积文本，不截尾会让字幕 interim 越来越长、撑爆显示区
 // ---------------------------------------------------------------------------
-bool SherpaEngine::stream_begin() {
-    if (!initialized_ || !online_) return false;
-    const SherpaApi& api = g_api;
-    if (stream_) { api.DestroyOnlineStream((const SherpaOnnxOnlineStream*)stream_); stream_ = nullptr; }
-    stream_ = (void*)api.CreateOnlineStream((const SherpaOnnxOnlineRecognizer*)recognizer_);
-    if (!stream_) { last_err_ = "创建流式解码会话失败"; return false; }
-    return true;
+void* SherpaEngine::stream_begin() {
+    if (!initialized_ || !online_) return nullptr;
+    const void* s = g_api.CreateOnlineStream((const SherpaOnnxOnlineRecognizer*)recognizer_);
+    if (!s) { last_err_ = "创建流式解码会话失败"; return nullptr; }
+    return const_cast<void*>(s);
 }
 
-void SherpaEngine::stream_feed(const float* pcm, size_t n) {
-    if (!stream_ || n == 0) return;
-    g_api.OnlineStreamAcceptWaveform((const SherpaOnnxOnlineStream*)stream_,
+void SherpaEngine::stream_feed(void* sess, const float* pcm, size_t n) {
+    if (!sess || n == 0) return;
+    g_api.OnlineStreamAcceptWaveform((const SherpaOnnxOnlineStream*)sess,
                                      16000, pcm, (int32_t)n);
 }
 
-std::string SherpaEngine::decode_and_text() {
+std::string SherpaEngine::decode_and_text(const SherpaOnnxOnlineRecognizer* rec,
+                                          const SherpaOnnxOnlineStream* st) {
     const SherpaApi& api = g_api;
-    auto* rec = (const SherpaOnnxOnlineRecognizer*)recognizer_;
-    auto* st = (const SherpaOnnxOnlineStream*)stream_;
     while (api.IsOnlineStreamReady(rec, st)) {
         api.DecodeOnlineStream(rec, st);
     }
@@ -245,18 +244,19 @@ std::string SherpaEngine::decode_and_text() {
     return text;
 }
 
-std::string SherpaEngine::stream_fetch() {
-    if (!stream_) return "";
-    std::string text = decode_and_text();
+std::string SherpaEngine::stream_fetch(void* sess) {
+    if (!sess) return "";
+    std::string text = decode_and_text((const SherpaOnnxOnlineRecognizer*)recognizer_,
+                                       (const SherpaOnnxOnlineStream*)sess);
     size_t b = text.find_first_not_of(" \t\r\n");
     size_t e = text.find_last_not_of(" \t\r\n");
     return (b == std::string::npos) ? "" : text.substr(b, e - b + 1);
 }
 
-std::string SherpaEngine::stream_finalize() {
-    if (!stream_) return "";
+std::string SherpaEngine::stream_finalize(void* sess) {
+    if (!sess) return "";
     auto* rec = (const SherpaOnnxOnlineRecognizer*)recognizer_;
-    auto* st = (const SherpaOnnxOnlineStream*)stream_;
+    auto* st = (const SherpaOnnxOnlineStream*)sess;
     g_api.OnlineStreamInputFinished(st); // 收尾：encoder 消化剩余帧
     while (g_api.IsOnlineStreamReady(rec, st)) {
         g_api.DecodeOnlineStream(rec, st);
@@ -266,7 +266,6 @@ std::string SherpaEngine::stream_finalize() {
     if (r && r->text) text = r->text; // 定稿句完整不截尾
     if (r) g_api.DestroyOnlineRecognizerResult(r);
     g_api.DestroyOnlineStream(st);
-    stream_ = nullptr;
     size_t b = text.find_first_not_of(" \t\r\n");
     size_t e = text.find_last_not_of(" \t\r\n");
     return (b == std::string::npos) ? "" : text.substr(b, e - b + 1);
