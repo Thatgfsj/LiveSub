@@ -242,7 +242,7 @@ void SettingsWindow::read_fields() {
     }
     else if (IsDlgButtonChecked(hwnd_, IDC_MODEL_FAST) == BST_CHECKED) {
         cfg_.model_size  = "fast";
-        cfg_.model_path  = "model/fast/encoder-epoch-99-avg-1.int8.onnx";
+        cfg_.model_path  = "model/fast/encoder.int8.onnx";
         cfg_.mmproj_path = "model/fast/tokens.txt";
     }
     else {

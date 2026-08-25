@@ -228,7 +228,8 @@ Config Config::load(const std::string& path) {
         c.mmproj_path = "model/sensevoice/tokens.txt";
     } else if (c.model_size == "fast" &&
                c.model_path.find("encoder") == std::string::npos) {
-        c.model_path  = "model/fast/encoder-epoch-99-avg-1.int8.onnx";
+        // 2023-12 简体中文优化版流式 zipformer（约73MB，零重复字）
+        c.model_path  = "model/fast/encoder.int8.onnx";
         c.mmproj_path = "model/fast/tokens.txt";
     }
     return c;

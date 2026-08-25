@@ -32,8 +32,8 @@ static const char* kSmallMir = "https://hf-mirror.com/ggml-org/Qwen3-ASR-0.6B-GG
 static const char* kSmallHf  = "https://huggingface.co/ggml-org/Qwen3-ASR-0.6B-GGUF/resolve/main/";
 static const char* kSvMir    = "https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/";
 static const char* kSvHf     = "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/";
-static const char* kZiMir    = "https://hf-mirror.com/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/";
-static const char* kZiHf     = "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/";
+static const char* kZiMir    = "https://hf-mirror.com/csukuangfj/sherpa-onnx-streaming-zipformer-multi-zh-hans-int8-2023-12-13/resolve/main/";
+static const char* kZiHf     = "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-multi-zh-hans-int8-2023-12-13/resolve/main/";
 
 struct FileSpec {
     const char* rel;      // 相对 model 目录的保存路径（含子目录）
@@ -60,10 +60,11 @@ static FileSpec g_files_sv[] = {
     { "sensevoice\\tokens.txt",      kSvMir, kSvHf, "tokens.txt",      10000ull,     L"词表" },
 };
 static FileSpec g_files_fast[] = {
-    { "fast\\encoder-epoch-99-avg-1.int8.onnx", kZiMir, kZiHf, "encoder-epoch-99-avg-1.int8.onnx", 181895032ull, L"编码器" },
-    { "fast\\decoder-epoch-99-avg-1.int8.onnx", kZiMir, kZiHf, "decoder-epoch-99-avg-1.int8.onnx", 13091040ull,  L"解码器" },
-    { "fast\\joiner-epoch-99-avg-1.int8.onnx",  kZiMir, kZiHf, "joiner-epoch-99-avg-1.int8.onnx",  3228404ull,   L"连接器" },
-    { "fast\\tokens.txt",                       kZiMir, kZiHf, "tokens.txt",                       10000ull,     L"词表" },
+    // 2023-12 简体中文优化版（约73MB）；本地统一标准名（decoder 远端无 .int8 后缀）
+    { "fast\\encoder.int8.onnx", kZiMir, kZiHf, "encoder-epoch-20-avg-1-chunk-16-left-128.int8.onnx", 70104213ull, L"编码器" },
+    { "fast\\decoder.int8.onnx", kZiMir, kZiHf, "decoder-epoch-20-avg-1-chunk-16-left-128.onnx",     5165084ull,  L"解码器" },
+    { "fast\\joiner.int8.onnx",  kZiMir, kZiHf, "joiner-epoch-20-avg-1-chunk-16-left-128.int8.onnx", 1033417ull,  L"连接器" },
+    { "fast\\tokens.txt",        kZiMir, kZiHf, "tokens.txt",                                        18626ull,    L"词表" },
 };
 
 static HWND g_progress = nullptr, g_status = nullptr, g_done = nullptr;

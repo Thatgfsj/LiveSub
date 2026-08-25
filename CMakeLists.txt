@@ -183,3 +183,15 @@ add_executable(record_test_wav tools/record_test_wav.cpp src/audio/wasapi_captur
 target_include_directories(record_test_wav PRIVATE src)
 target_link_libraries(record_test_wav PRIVATE ole32 oleaut32)
 target_compile_definitions(record_test_wav PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+
+# 模型下载器（独立 exe，随主程序打包发布）
+add_executable(model-dl WIN32
+    tools/model_dl_main.cpp
+    src/tools/model_downloader.cpp
+)
+target_include_directories(model-dl PRIVATE src)
+target_link_libraries(model-dl PRIVATE comctl32 winhttp ole32)
+target_compile_definitions(model-dl PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+if(MINGW)
+    target_link_options(model-dl PRIVATE -municode -mwindows -static)
+endif()

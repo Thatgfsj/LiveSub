@@ -151,7 +151,8 @@ bool SherpaEngine::init(const AsrEngineParams& p, std::string* err) {
         c.model_config.tokens       = tokens_path_.c_str();
         c.model_config.num_threads  = n_threads_;
         c.model_config.provider     = "cpu";
-        c.decoding_method           = "greedy_search";
+        // beam search：greedy 在 transducer 上易产出重复 token（"大大""来来"）
+        c.decoding_method           = "modified_beam_search";
         c.enable_endpoint           = 0; // 端点检测由上层 VAD 负责
 
         recognizer_ = (void*)api.CreateOnlineRecognizer(&c);

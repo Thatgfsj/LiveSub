@@ -713,10 +713,10 @@ bool App::check_model_files() {
                  {mp + "\\sensevoice\\tokens.txt",      10000LL}};
         which = "均衡模型（SenseVoice）";
     } else if (cfg_.model_size == "fast") {
-        files = {{mp + "\\fast\\encoder-epoch-99-avg-1.int8.onnx", 150000000LL},
-                 {mp + "\\fast\\decoder-epoch-99-avg-1.int8.onnx", 10000000LL},
-                 {mp + "\\fast\\joiner-epoch-99-avg-1.int8.onnx",  3000000LL},
-                 {mp + "\\fast\\tokens.txt",                       10000LL}};
+        files = {{mp + "\\fast\\encoder.int8.onnx", 60000000LL},
+                 {mp + "\\fast\\decoder.int8.onnx",  4000000LL},
+                 {mp + "\\fast\\joiner.int8.onnx",    900000LL},
+                 {mp + "\\fast\\tokens.txt",           10000LL}};
         which = "极速模型（流式 zipformer）";
     } else {
         files = {{mp + "\\Qwen3-ASR-1.7B-Q8_0.gguf",        1000000000LL},

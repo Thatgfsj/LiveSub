@@ -104,10 +104,10 @@ int main() {
             need = {{mp + "\\sensevoice\\model.int8.onnx", 200000000LL},
                     {mp + "\\sensevoice\\tokens.txt", 10000LL}};
         } else if (c.model_size == "fast") {
-            need = {{mp + "\\fast\\encoder-epoch-99-avg-1.int8.onnx", 150000000LL},
-                    {mp + "\\fast\\decoder-epoch-99-avg-1.int8.onnx", 10000000LL},
-                    {mp + "\\fast\\joiner-epoch-99-avg-1.int8.onnx", 3000000LL},
-                    {mp + "\\fast\\tokens.txt", 10000LL}};
+            need = {{mp + "\\fast\\encoder.int8.onnx", 60000000LL},
+                    {mp + "\\fast\\decoder.int8.onnx",  4000000LL},
+                    {mp + "\\fast\\joiner.int8.onnx",    900000LL},
+                    {mp + "\\fast\\tokens.txt",           10000LL}};
         } else {
             need = {{mp + "\\Qwen3-ASR-1.7B-Q8_0.gguf", 1000000000LL},
                     {mp + "\\mmproj-Qwen3-ASR-1.7B-bf16.gguf", 100000000LL}};
